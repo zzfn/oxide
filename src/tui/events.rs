@@ -94,10 +94,21 @@ pub fn handle_key_event(key: KeyEvent, tui_sender: &UnboundedSender<TuiEvent>) -
         KeyCode::PageDown => {
             tui_sender.send(TuiEvent::PageDown)?;
         }
+        KeyCode::Home => {
+            tui_sender.send(TuiEvent::ScrollToTop)?;
+        }
+        KeyCode::End => {
+            tui_sender.send(TuiEvent::ScrollToBottom)?;
+        }
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             tui_sender.send(TuiEvent::Command("/toggle-tools".to_string()))?;
         }
-        KeyCode::Backspace => {}
+        KeyCode::Backspace => {
+            tui_sender.send(TuiEvent::Backspace)?;
+        }
+        KeyCode::Delete => {
+            tui_sender.send(TuiEvent::Backspace)?;
+        }
         KeyCode::Char(c) => {
             tui_sender.send(TuiEvent::Input(c.to_string()))?;
         }

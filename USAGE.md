@@ -1,4 +1,4 @@
-# CLI 使用指南
+# TUI 使用指南
 
 ## 快捷键
 
@@ -12,10 +12,12 @@ Oxide CLI 运行在终端环境中，支持标准的终端快捷键：
 - `Ctrl+U` - 清除当前输入行的内容
 - `Ctrl+A` - 移动光标到行首
 - `Ctrl+E` - 移动光标到行末
+- `Ctrl+T` - 显示/隐藏工具面板
+- `Home` - 滚动到顶部
+- `End` - 滚动到底部
 
 ### 斜杠命令
 
-- `/help` - 显示帮助信息，列出所有可用命令
 - `/clear` - 清空对话历史，重置会话
 - `/exit` - 优雅退出程序
 
@@ -23,99 +25,36 @@ Oxide CLI 运行在终端环境中，支持标准的终端快捷键：
 
 ### 基本对话
 
-```
-==================================================
-Oxide CLI 0.1.0 - DeepSeek Agent
-==================================================
-模型: deepseek-chat
-提示: 输入 /help 查看帮助
-提示: 输入 /exit 退出
-
-你>[0] 你好！
-你好！我是 Oxide 助手，有什么可以帮助你的吗？
-
-你>[1] 请用中文回答
-好的，我会用中文与你交流。有什么问题需要我帮助解决吗？
-```
+1. 运行 `oxide` 进入 TUI 界面
+2. 在底部输入框输入问题并回车发送
+3. 使用滚动键浏览历史消息
 
 ### 文件操作
 
 ```
-你>[2] 读取 README.md 文件的内容
-[工具] read_file
-{"path": "README.md"}
-
-文件内容已读取完成。README.md 包含了项目的介绍和使用说明。
-
-你>[3] 在项目中创建一个新的配置文件
-[工具] write_file
-{"path": "config.json", "content": "{\"debug\": true}"}
-
-配置文件 config.json 已创建成功，内容为：
-{
-  "debug": true
-}
+读取 README.md 文件的内容
+在项目中创建一个新的配置文件
 ```
 
 ### Shell 命令执行
 
 ```
-你>[4] 查看当前目录的文件
-[工具] shell_execute
-{"command": "ls -la"}
-
-当前目录的文件列表：
-total 24
-drwxr-xr-x  4 user  group   128 Jan 19 10:00 .
-drwxr-xr-x 10 user  group   320 Jan 19 10:00 ..
--rw-r--r--  1 user  group    50 Jan 19 10:00 README.md
--rw-r--r--  1 user  group    20 Jan 19 10:00 config.json
-
-你>[5] 统计代码行数
-[工具] shell_execute
-{"command": "find src -name '*.rs' | xargs wc -l"}
-
-统计结果：
-     150 src/main.rs
-      50 src/config.rs
-       30 src/lib.rs
-     230 total
+查看当前目录的文件
+统计代码行数
 ```
 
 ### 错误处理
 
 ```
-你>[6] 读取一个不存在的文件
-[工具] read_file
-{"path": "nonexistent.txt"}
-
-错误: No such file or directory (os error 2)
-
-你>[7] 执行一个无效的命令
-[工具] shell_execute
-{"command": "invalidcommand123"}
-
-错误: command not found: invalidcommand123
+读取一个不存在的文件
+执行一个无效的命令
 ```
 
 ### 使用斜杠命令
 
 ```
-你>[8] /help
-
-可用命令:
-  /help  - 显示此帮助信息
-  /clear  - 清空对话历史
-  /exit  - 退出程序
-
-你>[9] /clear
-对话历史已清空
-
-你>[0] 这是一个新的对话开始
-好的，我们可以开始新的对话了！之前的对话历史已被清空。
-
-你>[1] /exit
-再见!
+/clear
+/exit
 ```
 
 ## 高级技巧
@@ -137,14 +76,7 @@ Rust 是一门系统级编程语言，注重安全性、并发性和性能...
 AI 可以自动调用多个工具来完成复杂任务：
 
 ```
-你>[0] 帮我检查项目的构建状态
-[工具] shell_execute
-{"command": "cargo check"}
-
-[工具] shell_execute
-{"command": "cargo test"}
-
-项目检查通过，所有测试也正常运行。
+帮我检查项目的构建状态
 ```
 
 ### 文件批量操作
@@ -152,11 +84,7 @@ AI 可以自动调用多个工具来完成复杂任务：
 AI 可以批量处理多个文件：
 
 ```
-你>[0] 统计项目中所有 .rs 文件的代码行数
-[工具] shell_execute
-{"command": "find . -name '*.rs' -exec wc -l {} + | tail -1"}
-
-项目中共有 1500 行 Rust 代码。
+统计项目中所有 .rs 文件的代码行数
 ```
 
 ## 故障排除
@@ -168,6 +96,11 @@ AI 可以批量处理多个文件：
 解决方案：
 1. 设置环境变量：`export DEEPSEEK_API_KEY=your_key`
 2. 或创建 `.env` 文件并添加：`DEEPSEEK_API_KEY=your_key`
+
+**问题：打字机效果过慢或过快**
+
+解决方案：
+- 设置 `STREAM_CHARS_PER_TICK` 调整流式速度（例如 `export STREAM_CHARS_PER_TICK=12`）
 
 **问题：API Key 验证失败**
 

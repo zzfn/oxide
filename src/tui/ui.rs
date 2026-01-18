@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{List, ListItem, Paragraph, Wrap},
     Frame,
 };
 
@@ -38,41 +38,33 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),
-            Constraint::Length(8),
+            Constraint::Length(2),
+            Constraint::Length(4),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(area);
 
-    let logo_lines: Vec<Line> = OXIDE_LOGO
-        .lines()
-        .map(|line| Line::from(vec![Span::styled(line, Style::default().fg(Color::Cyan))]))
-        .collect();
+    let title_lines = vec![Line::from(vec![Span::styled(
+        "Oxide CLI",
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )])];
 
-    let logo_paragraph = Paragraph::new(logo_lines).alignment(Alignment::Center);
-    frame.render_widget(logo_paragraph, chunks[0]);
+    let title_paragraph = Paragraph::new(title_lines).alignment(Alignment::Center);
+    frame.render_widget(title_paragraph, chunks[0]);
 
     let welcome_text = vec![
         Line::from(vec![
-            Span::styled("✨ ", Style::default().fg(Color::Yellow)),
-            Span::styled(
-                "欢迎使用 Oxide CLI!",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("版本: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("版本 ", Style::default().fg(Color::DarkGray)),
             Span::styled(env!("CARGO_PKG_VERSION"), Style::default().fg(Color::White)),
-        ]),
-        Line::from(vec![
-            Span::styled("模型: ", Style::default().fg(Color::DarkGray)),
+            Span::raw("  "),
+            Span::styled("模型 ", Style::default().fg(Color::DarkGray)),
             Span::styled(app.model.clone(), Style::default().fg(Color::Blue)),
         ]),
         Line::from(vec![
-            Span::styled("会话: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("会话 ", Style::default().fg(Color::DarkGray)),
             Span::styled(app.session_id.clone(), Style::default().fg(Color::Magenta)),
         ]),
     ];
@@ -82,48 +74,30 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
 
     let tips_text = vec![
         Line::from(vec![
-            Span::styled("💡 ", Style::default().fg(Color::Yellow)),
-            Span::styled(
-                "快速开始提示",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("1. ", Style::default().fg(Color::White)),
-            Span::styled("提问、编辑文件或运行命令", Style::default().fg(Color::Gray)),
+            Span::styled("输入内容后回车发送", Style::default().fg(Color::Gray)),
         ]),
         Line::from(vec![
-            Span::styled("2. ", Style::default().fg(Color::White)),
-            Span::styled("具体描述以获得最佳结果", Style::default().fg(Color::Gray)),
+            Span::styled("Ctrl+T 切换工具面板", Style::default().fg(Color::Gray)),
         ]),
         Line::from(vec![
-            Span::styled("3. ", Style::default().fg(Color::White)),
-            Span::styled("输入 /help 查看可用命令", Style::default().fg(Color::Gray)),
+            Span::styled("/clear 清空 | /exit 退出", Style::default().fg(Color::Gray)),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
             "按任意键开始",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )]),
     ];
 
     let tips_paragraph = Paragraph::new(tips_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: false });
     frame.render_widget(tips_paragraph, chunks[2]);
 
     let footer_text = vec![Line::from(vec![Span::styled(
-        format!("Ctrl+C 退出 | /help 查看命令"),
+        "Ctrl+C 退出 | /clear 清空 | Ctrl+T 工具面板",
         Style::default().fg(Color::DarkGray),
     )])];
 
@@ -139,48 +113,45 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let status_text = match app.state {
-        crate::tui::AppState::Normal => "✓ 就绪",
-        crate::tui::AppState::Processing => "⟳ 处理中...",
-        crate::tui::AppState::Error(ref e) => &format!("✗ {}", e),
+        crate::tui::AppState::Normal => "就绪",
+        crate::tui::AppState::Processing => "处理中...",
+        crate::tui::AppState::Error(ref e) => e,
     };
 
     let status_line = vec![
         Span::styled(
-            "🤖 Oxide ",
+            "Oxide",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(""),
+        Span::raw("  "),
         Span::styled(
             format!("v{}", env!("CARGO_PKG_VERSION")),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::raw(""),
-        Span::styled(
-            app.model.clone(),
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(""),
+        Span::raw("  "),
+        Span::styled(app.model.clone(), Style::default().fg(Color::Blue)),
+        Span::raw("  "),
         Span::styled(app.session_id.clone(), Style::default().fg(Color::Magenta)),
-        Span::raw(""),
+        Span::raw("  "),
         Span::styled(
-            format!("消息: {}", app.message_count),
+            format!("消息 {}", app.message_count),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::raw(""),
+        Span::raw("  "),
         Span::styled(status_text, status_style),
     ];
 
-    let paragraph = Paragraph::new(Line::from(status_line))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
-        .alignment(Alignment::Center);
+    let separator = "─".repeat(area.width as usize);
+    let paragraph = Paragraph::new(vec![
+        Line::from(status_line),
+        Line::from(vec![Span::styled(
+            separator,
+            Style::default().fg(Color::DarkGray),
+        )]),
+    ])
+    .alignment(Alignment::Center);
 
     frame.render_widget(paragraph, area);
 }
@@ -192,19 +163,7 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
         .map(|msg| {
             let display_lines = match msg.msg_type {
                 MessageType::User => {
-                    let separator = "─".repeat(40);
-                    let prefix_style = Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD);
-                    let prefix_text = "👤 你";
-
                     vec![
-                        Line::from(vec![
-                            Span::styled(separator, Style::default().fg(Color::DarkGray)),
-                            Span::raw(" "),
-                            Span::styled(prefix_text, prefix_style),
-                        ]),
-                        Line::from(""),
                         Line::from(vec![Span::styled(
                             msg.content.clone(),
                             Style::default().fg(Color::White),
@@ -213,21 +172,9 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
                     ]
                 }
                 MessageType::Assistant => {
-                    let separator = "─".repeat(40);
-                    let prefix_style = Style::default()
-                        .fg(Color::Blue)
-                        .add_modifier(Modifier::BOLD);
-                    let prefix_text = "🤖 AI";
                     let content = render_markdown(&msg.content);
 
-                    let mut lines = vec![
-                        Line::from(vec![
-                            Span::styled(separator, Style::default().fg(Color::DarkGray)),
-                            Span::raw(" "),
-                            Span::styled(prefix_text, prefix_style),
-                        ]),
-                        Line::from(""),
-                    ];
+                    let mut lines = Vec::new();
 
                     for line in content.lines() {
                         lines.push(Line::from(vec![Span::styled(
@@ -240,26 +187,14 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
                     lines
                 }
                 MessageType::Tool => {
-                    let separator = "─".repeat(40);
-                    let prefix_style = Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD);
-                    let prefix_text = "🔧 工具";
                     let tool_name = msg
                         .tool_name
                         .as_ref()
                         .map(|s| s.as_str())
                         .unwrap_or("Unknown");
-                    let content = format!("{}\n{}", tool_name, msg.content);
+                    let content = format!("{} · {}", tool_name, msg.content);
 
-                    let mut lines = vec![
-                        Line::from(vec![
-                            Span::styled(separator, Style::default().fg(Color::DarkGray)),
-                            Span::raw(" "),
-                            Span::styled(prefix_text, prefix_style),
-                        ]),
-                        Line::from(""),
-                    ];
+                    let mut lines = Vec::new();
 
                     for line in content.lines() {
                         lines.push(Line::from(vec![Span::styled(
@@ -277,13 +212,7 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
     frame.render_widget(list, area);
 }
@@ -305,78 +234,119 @@ fn render_input_box(frame: &mut Frame, app: &App, area: Rect) {
         ),
     ])];
 
-    let paragraph = Paragraph::new(input_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(input_text).wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
 }
 
 fn render_tool_panel(frame: &mut Frame, app: &App, area: Rect) {
     let panel_width = 32;
-    let panel_x = area.right() - panel_width - 1;
+    let panel_x = area.right().saturating_sub(panel_width);
 
     let panel_area = Rect {
         x: panel_x,
-        y: area.top() + 1,
+        y: area.top(),
         width: panel_width,
-        height: area.height - 2,
+        height: area.height,
     };
 
-    let items: Vec<ListItem> = if app.tool_status.is_empty() {
-        vec![ListItem::new(Line::from(vec![Span::styled(
+    let mut items: Vec<ListItem> = vec![ListItem::new(Line::from(vec![Span::styled(
+        "工具状态",
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]))];
+
+    let total = app.tool_status.len();
+    let completed = app
+        .tool_status
+        .iter()
+        .filter(|(_, status)| status.contains("成功") || status.contains("失败"))
+        .count();
+    let progress_line = if total == 0 {
+        "进度 0/0".to_string()
+    } else {
+        format!("进度 {}/{}", completed, total)
+    };
+    items.push(ListItem::new(Line::from(vec![Span::styled(
+        progress_line,
+        Style::default().fg(Color::DarkGray),
+    )])));
+
+    let spinner_frames = ['|', '/', '-', '\\'];
+    let spinner = spinner_frames[(app.tick_count as usize) % spinner_frames.len()];
+
+    if app.tool_status.is_empty() {
+        items.push(ListItem::new(Line::from(vec![Span::styled(
             "暂无工具执行",
             Style::default().fg(Color::DarkGray),
-        )]))]
+        )])));
     } else {
-        app.tool_status
-            .iter()
-            .map(|(name, status)| {
-                let status_style = if status.contains("执行中") {
-                    Style::default().fg(Color::Yellow)
-                } else if status.contains("成功") {
-                    Style::default().fg(Color::Green)
-                } else if status.contains("失败") {
-                    Style::default().fg(Color::Red)
-                } else {
-                    Style::default().fg(Color::Gray)
-                };
+        for (name, status) in &app.tool_status {
+            let status_style = if status.contains("执行中") {
+                Style::default().fg(Color::Yellow)
+            } else if status.contains("成功") {
+                Style::default().fg(Color::Green)
+            } else if status.contains("失败") {
+                Style::default().fg(Color::Red)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
 
-                let icon = if status.contains("执行中") {
-                    "⟳ "
-                } else if status.contains("成功") {
-                    "✓ "
-                } else if status.contains("失败") {
-                    "✗ "
-                } else {
-                    "• "
-                };
+            let icon = if status.contains("执行中") {
+                format!("{} ", spinner)
+            } else if status.contains("成功") {
+                "✓ ".to_string()
+            } else if status.contains("失败") {
+                "✗ ".to_string()
+            } else {
+                "• ".to_string()
+            };
 
-                ListItem::new(Line::from(vec![
-                    Span::styled(icon, status_style),
-                    Span::styled(name.clone(), Style::default().fg(Color::Cyan)),
-                    Span::raw("\n"),
-                    Span::styled(format!("  {}", status), Style::default().fg(Color::Gray)),
-                ]))
-            })
-            .collect()
-    };
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(icon, status_style),
+                Span::styled(name.clone(), Style::default().fg(Color::Cyan)),
+            ])));
+            items.push(ListItem::new(Line::from(vec![Span::styled(
+                format!("  {}", status),
+                Style::default().fg(Color::Gray),
+            )])));
+        }
+    }
 
-    let list = List::new(items).block(
-        Block::default()
-            .title(" 🔧 工具状态 ")
-            .title_style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)),
-    );
+    let recent_logs: Vec<_> = app
+        .messages
+        .iter()
+        .rev()
+        .filter(|msg| msg.msg_type == MessageType::Tool)
+        .take(4)
+        .collect();
+
+    if !recent_logs.is_empty() {
+        items.push(ListItem::new(Line::from("")));
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            "最近日志",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )])));
+
+        for log in recent_logs.into_iter().rev() {
+            let name = log.tool_name.as_deref().unwrap_or("Unknown");
+            let content = if log.content.len() > 26 {
+                format!("{}...", &log.content[..26])
+            } else {
+                log.content.clone()
+            };
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(name, Style::default().fg(Color::Cyan)),
+                Span::raw(": "),
+                Span::styled(content, Style::default().fg(Color::DarkGray)),
+            ])));
+        }
+    }
+
+    let list = List::new(items);
 
     frame.render_widget(list, panel_area);
 }
