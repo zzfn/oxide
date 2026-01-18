@@ -1,48 +1,63 @@
+mod config;
 mod tools;
 
 use anyhow::{Context, Result};
 use colored::Colorize;
+use config::Config;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::env;
+use std::io::Write;
 
-const API_URL: &str = "https://api.deepseek.com/v1/chat/completions";
-const MODEL: &str = "deepseek-chat";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum Content {
-    Text(String),
-    Array(Vec<ContentBlock>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-enum ContentBlock {
-    Text {
-        text: String,
-    },
-    ToolUse {
-        id: String,
-        name: String,
-        input: serde_json::Value,
-    },
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-        is_error: Option<bool>,
-    },
-}
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message {
     role: String,
-    content: Content,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<ToolCall>>,
+}
+
+impl Message {
+    fn user(text: &str) -> Self {
+        Message {
+            role: "user".to_string(),
+            content: Some(text.to_string()),
+            tool_call_id: None,
+            tool_calls: None,
+        }
+    }
+
+    fn assistant_with_text(text: &str) -> Self {
+        Message {
+            role: "assistant".to_string(),
+            content: Some(text.to_string()),
+            tool_call_id: None,
+            tool_calls: None,
+        }
+    }
+
+    fn assistant_with_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
+        Message {
+            role: "assistant".to_string(),
+            content: None,
+            tool_call_id: None,
+            tool_calls: Some(tool_calls),
+        }
+    }
+
+    fn tool_result(tool_use_id: &str, content: &str) -> Self {
+        Message {
+            role: "tool".to_string(),
+            content: Some(content.to_string()),
+            tool_call_id: Some(tool_use_id.to_string()),
+            tool_calls: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,15 +88,50 @@ struct FunctionDefinition {
     parameters: serde_json::Value,
 }
 
+#[derive(Debug, Clone)]
+enum Command {
+    Exit,
+    Help,
+    Clear,
+    Unknown(String),
+}
+
+impl Command {
+    fn parse(input: &str) -> Option<Self> {
+        if !input.starts_with('/') {
+            return None;
+        }
+
+        let parts: Vec<&str> = input.trim().split_whitespace().collect();
+        if parts.is_empty() {
+            return None;
+        }
+
+        match parts[0] {
+            "/exit" => Some(Command::Exit),
+            "/help" => Some(Command::Help),
+            "/clear" => Some(Command::Clear),
+            _ => Some(Command::Unknown(parts[0].to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum AssistantResponse {
+    Text(String),
+    ToolCalls(Vec<ToolCall>),
+}
+
 struct Agent {
     client: Client,
-    api_key: String,
+    config: Config,
     messages: Vec<Message>,
     tools: Vec<Tool>,
+    message_count: usize,
 }
 
 impl Agent {
-    fn new(api_key: String) -> Self {
+    fn new(config: Config) -> Self {
         let client = Client::new();
         let tools = vec![
             Tool {
@@ -143,33 +193,63 @@ impl Agent {
 
         Agent {
             client,
-            api_key,
+            config,
             messages: Vec::new(),
             tools,
+            message_count: 0,
         }
     }
 
-    async fn add_user_message(&mut self, text: &str) {
-        self.messages.push(Message {
-            role: "user".to_string(),
-            content: Content::Text(text.to_string()),
-            tool_call_id: None,
-            tool_calls: None,
-        });
+    fn clear_history(&mut self) {
+        self.messages.clear();
+        self.message_count = 0;
     }
 
-    async fn send_message(&mut self) -> Result<Vec<ContentBlock>> {
+    fn display_welcome(&self) {
+        println!();
+        println!("{}", "=".repeat(50).cyan());
+        println!(
+            "{} {} - DeepSeek Agent",
+            "Oxide CLI".bold().cyan(),
+            VERSION.dimmed()
+        );
+        println!("{}", "=".repeat(50).cyan());
+        println!("{} {}", "模型:".green(), self.config.model.bold());
+        println!("{} 输入 {}", "提示:".yellow(), "/help".cyan().bold());
+        println!("{} 输入 {} 退出", "提示:".yellow(), "/exit".cyan().bold());
+        println!();
+    }
+
+    fn show_help() {
+        println!();
+        println!("{}", "可用命令:".bold().cyan());
+        println!("  {}  - 显示此帮助信息", "/help".cyan());
+        println!("  {}  - 清空对话历史", "/clear".cyan());
+        println!("  {}  - 退出程序", "/exit".cyan());
+        println!();
+    }
+
+    fn get_prompt(&self) -> String {
+        format!("{}[{}] ", "你>".green().bold(), self.message_count)
+    }
+
+    async fn add_user_message(&mut self, text: &str) {
+        self.messages.push(Message::user(text));
+        self.message_count += 1;
+    }
+
+    async fn send_message(&mut self) -> Result<AssistantResponse> {
         let request_body = json!({
-            "model": MODEL,
-            "max_tokens": 4096,
+            "model": self.config.model,
+            "max_tokens": self.config.max_tokens,
             "messages": self.messages,
             "tools": self.tools
         });
 
         let response = self
             .client
-            .post(API_URL)
-            .header("Authorization", format!("Bearer {}", &self.api_key))
+            .post(&self.config.api_url)
+            .header("Authorization", format!("Bearer {}", &self.config.api_key))
             .header("content-type", "application/json")
             .json(&request_body)
             .send()
@@ -177,151 +257,147 @@ impl Agent {
             .context("发送请求失败")?;
 
         if !response.status().is_success() {
+            let status = response.status();
             let error_text = response.text().await?;
-            anyhow::bail!("API 请求失败: {}", error_text);
+            anyhow::bail!("API 请求失败 ({}): {}", status, error_text);
         }
 
         let response_json: serde_json::Value = response.json().await?;
         let assistant_msg = &response_json["choices"][0]["message"];
 
-        let mut content_blocks = Vec::new();
+        let assistant_message =
+            if let Some(content) = assistant_msg.get("content").and_then(|c| c.as_str()) {
+                Message::assistant_with_text(content)
+            } else if let Some(tool_calls) =
+                assistant_msg.get("tool_calls").and_then(|tc| tc.as_array())
+            {
+                let calls: Vec<ToolCall> = tool_calls
+                    .iter()
+                    .filter_map(|tc| serde_json::from_value(tc.clone()).ok())
+                    .collect();
+                Message::assistant_with_tool_calls(calls)
+            } else {
+                anyhow::bail!("无效的 AI 响应格式");
+            };
 
-        if let Some(content) = assistant_msg.get("content").and_then(|c| c.as_str()) {
-            content_blocks.push(ContentBlock::Text {
-                text: content.to_string(),
-            });
-        }
-
-        if let Some(tool_calls) = assistant_msg.get("tool_calls").and_then(|tc| tc.as_array()) {
-            for tool_call in tool_calls {
-                if let (Some(id), Some(func)) = (
-                    tool_call.get("id").and_then(|i| i.as_str()),
-                    tool_call.get("function"),
-                ) {
-                    if let (Some(name), Some(args)) = (
-                        func.get("name").and_then(|n| n.as_str()),
-                        func.get("arguments").and_then(|a| a.as_str()),
-                    ) {
-                        let input: serde_json::Value = serde_json::from_str(args)
-                            .unwrap_or_else(|_| serde_json::Value::String(args.to_string()));
-                        content_blocks.push(ContentBlock::ToolUse {
-                            id: id.to_string(),
-                            name: name.to_string(),
-                            input,
-                        });
-                    }
-                }
-            }
-        }
-
-        let assistant_message = Message {
-            role: "assistant".to_string(),
-            content: Content::Array(content_blocks.clone()),
-            tool_call_id: None,
-            tool_calls: assistant_msg
-                .get("tool_calls")
-                .and_then(|tc| serde_json::from_value(tc.clone()).ok()),
-        };
         self.messages.push(assistant_message);
 
-        Ok(content_blocks)
+        let response = if let Some(content) = assistant_msg.get("content").and_then(|c| c.as_str())
+        {
+            AssistantResponse::Text(content.to_string())
+        } else if let Some(tool_calls) =
+            assistant_msg.get("tool_calls").and_then(|tc| tc.as_array())
+        {
+            let calls: Vec<ToolCall> = tool_calls
+                .iter()
+                .filter_map(|tc| serde_json::from_value(tc.clone()).ok())
+                .collect();
+            AssistantResponse::ToolCalls(calls)
+        } else {
+            anyhow::bail!("无效的 AI 响应格式");
+        };
+
+        Ok(response)
     }
 
-    async fn execute_tool(&self, tool_use: &ContentBlock) -> Result<ContentBlock> {
-        match tool_use {
-            ContentBlock::ToolUse { id, name, input } => {
-                let result = match name.as_str() {
-                    "read_file" => {
-                        let path = input["path"].as_str().context("缺少 path 参数")?;
-                        tools::read_file(path)?
-                    }
-                    "write_file" => {
-                        let path = input["path"].as_str().context("缺少 path 参数")?;
-                        let content = input["content"].as_str().context("缺少 content 参数")?;
-                        tools::write_file(path, content)?
-                    }
-                    "shell_execute" => {
-                        let command = input["command"].as_str().context("缺少 command 参数")?;
-                        tools::shell_execute(command)?
-                    }
-                    _ => anyhow::bail!("未知工具: {}", name),
-                };
+    async fn execute_tool(&self, tool_call: &ToolCall) -> Result<String> {
+        let name = &tool_call.function.name;
+        let input: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
+            .unwrap_or_else(|_| serde_json::Value::String(tool_call.function.arguments.clone()));
 
-                Ok(ContentBlock::ToolResult {
-                    tool_use_id: id.clone(),
-                    content: result.to_string(),
-                    is_error: None,
-                })
+        let result = match name.as_str() {
+            "read_file" => {
+                let path = input["path"].as_str().context("缺少 path 参数")?;
+                tools::read_file(path)?
             }
-            _ => anyhow::bail!("无效的工具使用块"),
-        }
+            "write_file" => {
+                let path = input["path"].as_str().context("缺少 path 参数")?;
+                let content = input["content"].as_str().context("缺少 content 参数")?;
+                tools::write_file(path, content)?
+            }
+            "shell_execute" => {
+                let command = input["command"].as_str().context("缺少 command 参数")?;
+                tools::shell_execute(command)?
+            }
+            _ => anyhow::bail!("未知工具: {}", name),
+        };
+
+        Ok(result.to_string())
     }
 
     async fn run(&mut self, user_input: &str) -> Result<()> {
         self.add_user_message(user_input).await;
 
         loop {
-            let content_blocks = self.send_message().await?;
+            print!("{}", "思考中...".dimmed().italic());
+            std::io::stdout().flush()?;
+            print!("\r{}\r", " ".repeat(20));
+            std::io::stdout().flush()?;
 
-            let mut tool_results = Vec::new();
-            let mut has_tool_use = false;
+            let response = self.send_message().await?;
 
-            for block in &content_blocks {
-                match block {
-                    ContentBlock::Text { text } => {
-                        println!("{}", text.cyan());
-                    }
-                    ContentBlock::ToolUse { name, input, .. } => {
-                        has_tool_use = true;
-                        println!("{} {}", "[Tool]".yellow(), name.bold());
-                        println!("{}", input.to_string().dimmed());
-
-                        let result = self.execute_tool(block).await?;
-                        tool_results.push(result);
-                    }
-                    _ => {}
+            match response {
+                AssistantResponse::Text(text) => {
+                    println!("{}", text.cyan());
+                    break;
                 }
-            }
+                AssistantResponse::ToolCalls(tool_calls) => {
+                    for tool_call in &tool_calls {
+                        println!("{} {}", "[工具]".yellow(), tool_call.function.name.bold());
+                        println!("{}", tool_call.function.arguments.dimmed());
 
-            if has_tool_use {
-                for result in &tool_results {
-                    if let ContentBlock::ToolResult {
-                        tool_use_id,
-                        content,
-                        is_error: _,
-                    } = result
-                    {
-                        self.messages.push(Message {
-                            role: "tool".to_string(),
-                            content: Content::Text(content.clone()),
-                            tool_call_id: Some(tool_use_id.clone()),
-                            tool_calls: None,
-                        });
+                        let result = self.execute_tool(tool_call).await?;
+                        self.messages
+                            .push(Message::tool_result(&tool_call.id, &result));
                     }
                 }
-            } else {
-                break;
             }
         }
 
         Ok(())
     }
+
+    async fn handle_command(&mut self, command: Command) -> Result<bool> {
+        match command {
+            Command::Exit => {
+                println!("{}", "再见!".cyan());
+                return Ok(true);
+            }
+            Command::Help => {
+                Self::show_help();
+            }
+            Command::Clear => {
+                self.clear_history();
+                println!("{}", "对话历史已清空".green());
+            }
+            Command::Unknown(cmd) => {
+                println!("{} 未知命令: {}", "错误:".red(), cmd);
+                println!("{} 输入 {} 查看可用命令", "提示:".yellow(), "/help".cyan());
+            }
+        }
+        Ok(false)
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
+    let config = Config::load().context("加载配置失败")?;
 
-    let api_key = env::var("DEEPSEEK_API_KEY").context("未设置 DEEPSEEK_API_KEY 环境变量")?;
+    if let Err(e) = config.validate() {
+        eprintln!("{} {}", "错误:".red(), e);
+        eprintln!("{} 请设置 DEEPSEEK_API_KEY 环境变量", "提示:".yellow());
+        eprintln!(
+            "{} 或在项目根目录创建 .env 文件并添加该变量",
+            "提示:".yellow()
+        );
+        std::process::exit(1);
+    }
 
-    let mut agent = Agent::new(api_key);
-
-    println!("{} Oxide CLI - DeepSeek Agent", "=".repeat(40).cyan());
-    println!("{} 输入 /exit 退出\n", "提示:".yellow());
+    let mut agent = Agent::new(config);
+    agent.display_welcome();
 
     loop {
-        print!("{} ", "用户>".green().bold());
-        use std::io::Write;
+        print!("{}", agent.get_prompt());
         std::io::stdout().flush()?;
 
         let mut input = String::new();
@@ -333,13 +409,16 @@ async fn main() -> Result<()> {
             continue;
         }
 
-        if input == "/exit" {
-            println!("{}", "再见!".cyan());
-            break;
+        if let Some(command) = Command::parse(input) {
+            let should_exit = agent.handle_command(command).await?;
+            if should_exit {
+                break;
+            }
+            continue;
         }
 
         if let Err(e) = agent.run(input).await {
-            eprintln!("{} {}", "错误:".red(), e);
+            println!("{} {}", "错误:".red(), e);
         }
 
         println!();
