@@ -4,6 +4,18 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+pub mod create_directory;
+pub mod delete_file;
+pub mod edit_file;
+pub mod grep_search;
+pub mod scan_codebase;
+
+pub use create_directory::create_directory;
+pub use delete_file::delete_file;
+pub use edit_file::edit_file;
+pub use grep_search::grep_search;
+pub use scan_codebase::scan_codebase;
+
 pub fn read_file(path: &str) -> Result<Value> {
     let content = fs::read_to_string(path).with_context(|| format!("无法读取文件: {}", path))?;
     Ok(json!({

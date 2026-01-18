@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["tui"]
+default = ["tui", "rustyline"]
 tui = ["ratatui", "crossterm", "syntect"]
+rustyline = ["dep:rustyline"]
 
 [dependencies]
 tokio = { version = "1.40", features = ["full"] }
@@ -16,13 +17,22 @@ clap = { version = "4.5", features = ["derive"] }
 dotenv = "0.15"
 colored = "2.1"
 anyhow = "1.0"
+thiserror = "1.0"
+patch-apply = "0.8.3"
+regex = "1.0"
+walkdir = "2.0"
+ignore = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+names = { version = "0.14.0", default-features = false }
 ratatui = { version = "0.30", optional = true }
 crossterm = { version = "0.29", optional = true }
 syntect = { version = "5.1", optional = true }
+rustyline = { version = "14.0", optional = true }
 
 [dev-dependencies]
 mockito = "1.4"
 tokio-test = "0.4"
+tempfile = "3.0"
 
 [[bin]]
 name = "oxide"

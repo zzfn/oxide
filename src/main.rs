@@ -1,4 +1,5 @@
 mod config;
+mod context;
 mod tools;
 
 #[cfg(feature = "tui")]
@@ -8,6 +9,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use colored::Colorize;
 use config::Config;
+use context::{ContextManager, FunctionCall, Message, ToolCall};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -24,69 +26,6 @@ struct Args {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Message {
-    role: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_call_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<Vec<ToolCall>>,
-}
-
-impl Message {
-    fn user(text: &str) -> Self {
-        Message {
-            role: "user".to_string(),
-            content: Some(text.to_string()),
-            tool_call_id: None,
-            tool_calls: None,
-        }
-    }
-
-    fn assistant_with_text(text: &str) -> Self {
-        Message {
-            role: "assistant".to_string(),
-            content: Some(text.to_string()),
-            tool_call_id: None,
-            tool_calls: None,
-        }
-    }
-
-    fn assistant_with_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
-        Message {
-            role: "assistant".to_string(),
-            content: None,
-            tool_call_id: None,
-            tool_calls: Some(tool_calls),
-        }
-    }
-
-    fn tool_result(tool_use_id: &str, content: &str) -> Self {
-        Message {
-            role: "tool".to_string(),
-            content: Some(content.to_string()),
-            tool_call_id: Some(tool_use_id.to_string()),
-            tool_calls: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ToolCall {
-    id: String,
-    #[serde(rename = "type")]
-    call_type: String,
-    function: FunctionCall,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct FunctionCall {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Tool {
     #[serde(rename = "type")]
     tool_type: String,
@@ -100,11 +39,34 @@ struct FunctionDefinition {
     parameters: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolCallResponse {
+    id: String,
+    #[serde(rename = "type")]
+    call_type: String,
+    function: FunctionCall,
+}
+
+impl From<ToolCallResponse> for ToolCall {
+    fn from(value: ToolCallResponse) -> Self {
+        ToolCall {
+            id: value.id,
+            call_type: value.call_type,
+            function: value.function,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum Command {
     Exit,
     Help,
     Clear,
+    Config,
+    History,
+    ListSessions,
+    LoadSession(String),
+    DeleteSession,
     Unknown(String),
 }
 
@@ -120,9 +82,20 @@ impl Command {
         }
 
         match parts[0] {
-            "/exit" => Some(Command::Exit),
-            "/help" => Some(Command::Help),
+            "/exit" | "/quit" => Some(Command::Exit),
+            "/help" | "/?" => Some(Command::Help),
             "/clear" => Some(Command::Clear),
+            "/config" => Some(Command::Config),
+            "/history" => Some(Command::History),
+            "/list" => Some(Command::ListSessions),
+            "/load" => {
+                if parts.len() > 1 {
+                    Some(Command::LoadSession(parts[1].to_string()))
+                } else {
+                    Some(Command::Unknown(parts[0].to_string()))
+                }
+            }
+            "/delete" => Some(Command::DeleteSession),
             _ => Some(Command::Unknown(parts[0].to_string())),
         }
     }
@@ -137,14 +110,17 @@ enum AssistantResponse {
 struct Agent {
     client: Client,
     pub config: Config,
-    pub messages: Vec<Message>,
+    context_manager: ContextManager,
     tools: Vec<Tool>,
-    message_count: usize,
 }
 
 impl Agent {
-    fn new(config: Config) -> Self {
+    fn new(config: Config) -> Result<Self> {
         let client = Client::new();
+        let storage_dir = std::path::PathBuf::from(".oxide/sessions");
+        let session_id = names::Generator::default().next().unwrap();
+        let context_manager = ContextManager::new(storage_dir, session_id)?;
+
         let tools = vec![
             Tool {
                 tool_type: "function".to_string(),
@@ -187,6 +163,107 @@ impl Agent {
             Tool {
                 tool_type: "function".to_string(),
                 function: FunctionDefinition {
+                    name: "edit_file".to_string(),
+                    description: "使用 unified diff patch 编辑文件（适用于小范围修改）".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "文件路径"
+                            },
+                            "patch": {
+                                "type": "string",
+                                "description": "Unified diff patch 字符串"
+                            }
+                        },
+                        "required": ["file_path", "patch"]
+                    }),
+                },
+            },
+            Tool {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "create_directory".to_string(),
+                    description: "创建目录（包括父目录）".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "目录路径"
+                            }
+                        },
+                        "required": ["path"]
+                    }),
+                },
+            },
+            Tool {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "delete_file".to_string(),
+                    description: "删除文件或目录".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "文件或目录路径"
+                            }
+                        },
+                        "required": ["path"]
+                    }),
+                },
+            },
+            Tool {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "grep_search".to_string(),
+                    description: "使用正则表达式搜索文件中的文本".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "root_path": {
+                                "type": "string",
+                                "description": "搜索的根目录"
+                            },
+                            "query": {
+                                "type": "string",
+                                "description": "正则表达式搜索模式"
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "最大结果数（默认 100）"
+                            }
+                        },
+                        "required": ["root_path", "query"]
+                    }),
+                },
+            },
+            Tool {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "scan_codebase".to_string(),
+                    description: "扫描并显示代码库目录结构".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "扫描的目录路径"
+                            },
+                            "max_depth": {
+                                "type": "integer",
+                                "description": "最大深度（默认 10）"
+                            }
+                        },
+                        "required": ["path"]
+                    }),
+                },
+            },
+            Tool {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
                     name: "shell_execute".to_string(),
                     description: "在终端执行 Shell 命令".to_string(),
                     parameters: json!({
@@ -203,18 +280,20 @@ impl Agent {
             },
         ];
 
-        Agent {
+        Ok(Agent {
             client,
             config,
-            messages: Vec::new(),
+            context_manager,
             tools,
-            message_count: 0,
-        }
+        })
     }
 
     fn clear_history(&mut self) {
-        self.messages.clear();
-        self.message_count = 0;
+        self.context_manager.clear();
+    }
+
+    fn message_count(&self) -> usize {
+        self.context_manager.get_messages().len()
     }
 
     fn display_welcome(&self) {
@@ -227,6 +306,11 @@ impl Agent {
         );
         println!("{}", "=".repeat(50).cyan());
         println!("{} {}", "模型:".green(), self.config.model.bold());
+        println!(
+            "{} {}",
+            "会话:".green(),
+            self.context_manager.session_id().bold()
+        );
         println!("{} 输入 {}", "提示:".yellow(), "/help".cyan().bold());
         println!("{} 输入 {} 退出", "提示:".yellow(), "/exit".cyan().bold());
         println!();
@@ -236,25 +320,29 @@ impl Agent {
         println!();
         println!("{}", "可用命令:".bold().cyan());
         println!("  {}  - 显示此帮助信息", "/help".cyan());
-        println!("  {}  - 清空对话历史", "/clear".cyan());
+        println!("  {}  - 清空当前对话", "/clear".cyan());
+        println!("  {}  - 显示当前配置", "/config".cyan());
+        println!("  {}  - 显示当前会话历史", "/history".cyan());
+        println!("  {}  - 列出所有会话", "/list".cyan());
+        println!("  {} <id> - 加载指定会话", "/load".cyan());
+        println!("  {}  - 删除当前会话", "/delete".cyan());
         println!("  {}  - 退出程序", "/exit".cyan());
         println!();
     }
 
     fn get_prompt(&self) -> String {
-        format!("{}[{}] ", "你>".green().bold(), self.message_count)
+        format!("{}[{}] ", "你>".green().bold(), self.message_count())
     }
 
     async fn add_user_message(&mut self, text: &str) {
-        self.messages.push(Message::user(text));
-        self.message_count += 1;
+        self.context_manager.add_message(Message::user(text));
     }
 
     async fn send_message(&mut self) -> Result<AssistantResponse> {
         let request_body = json!({
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
-            "messages": self.messages,
+            "messages": self.context_manager.get_messages(),
             "tools": self.tools
         });
 
@@ -292,7 +380,7 @@ impl Agent {
                 anyhow::bail!("无效的 AI 响应格式");
             };
 
-        self.messages.push(assistant_message);
+        self.context_manager.add_message(assistant_message);
 
         let response = if let Some(content) = assistant_msg.get("content").and_then(|c| c.as_str())
         {
@@ -327,6 +415,36 @@ impl Agent {
                 let content = input["content"].as_str().context("缺少 content 参数")?;
                 tools::write_file(path, content)?
             }
+            "edit_file" => {
+                let file_path = input["file_path"].as_str().context("缺少 file_path 参数")?;
+                let patch = input["patch"].as_str().context("缺少 patch 参数")?;
+                tools::edit_file(file_path, patch)?
+            }
+            "create_directory" => {
+                let path = input["path"].as_str().context("缺少 path 参数")?;
+                tools::create_directory(path)?
+            }
+            "delete_file" => {
+                let path = input["path"].as_str().context("缺少 path 参数")?;
+                tools::delete_file(path)?
+            }
+            "grep_search" => {
+                let root_path = input["root_path"].as_str().context("缺少 root_path 参数")?;
+                let query = input["query"].as_str().context("缺少 query 参数")?;
+                let max_results = match input.get("max_results") {
+                    Some(v) => Some(v.as_u64().context("max_results 格式错误")? as usize),
+                    None => None,
+                };
+                tools::grep_search(root_path, query, max_results)?
+            }
+            "scan_codebase" => {
+                let path = input["path"].as_str().context("缺少 path 参数")?;
+                let max_depth = match input.get("max_depth") {
+                    Some(v) => Some(v.as_u64().context("max_depth 格式错误")? as usize),
+                    None => None,
+                };
+                tools::scan_codebase(path, max_depth)?
+            }
             "shell_execute" => {
                 let command = input["command"].as_str().context("缺少 command 参数")?;
                 tools::shell_execute(command)?
@@ -359,8 +477,8 @@ impl Agent {
                         println!("{}", tool_call.function.arguments.dimmed());
 
                         let result = self.execute_tool(tool_call).await?;
-                        self.messages
-                            .push(Message::tool_result(&tool_call.id, &result));
+                        self.context_manager
+                            .add_message(Message::tool_result(&tool_call.id, &result));
                     }
                 }
             }
@@ -381,6 +499,101 @@ impl Agent {
             Command::Clear => {
                 self.clear_history();
                 println!("{}", "对话历史已清空".green());
+            }
+            Command::Config => {
+                println!();
+                println!("{}", "当前配置:".bold().cyan());
+                println!("  {}: {}", "模型".green(), self.config.model);
+                println!("  {}: {}", "API URL".green(), self.config.api_url);
+                println!("  {}: {}", "最大 Token".green(), self.config.max_tokens);
+                println!(
+                    "  {}: {}",
+                    "会话 ID".green(),
+                    self.context_manager.session_id()
+                );
+                println!();
+            }
+            Command::History => {
+                let messages = self.context_manager.get_messages();
+                println!();
+                println!("{}", "对话历史:".bold().cyan());
+                for (i, msg) in messages.iter().enumerate() {
+                    let role = match msg.role.as_str() {
+                        "user" => "用户",
+                        "assistant" => "助手",
+                        "tool" => "工具",
+                        _ => "未知",
+                    };
+                    println!("  [{}] {}:", i, role.green());
+                    if let Some(content) = &msg.content {
+                        let preview = if content.len() > 100 {
+                            format!("{}...", &content[..100])
+                        } else {
+                            content.clone()
+                        };
+                        println!("    {}", preview.dimmed());
+                    }
+                    if let Some(tool_calls) = &msg.tool_calls {
+                        for call in tool_calls {
+                            println!("    [工具调用] {}", call.function.name.yellow());
+                        }
+                    }
+                }
+                println!();
+            }
+            Command::ListSessions => {
+                let sessions = self.context_manager.list_sessions()?;
+                println!();
+                println!("{}", "可用会话:".bold().cyan());
+                if sessions.is_empty() {
+                    println!("  暂无会话");
+                } else {
+                    for session in &sessions {
+                        println!(
+                            "  {} - {} 条消息",
+                            session.session_id.cyan(),
+                            session.message_count
+                        );
+                        println!("    {}", session.last_updated.dimmed());
+                    }
+                }
+                println!();
+            }
+            Command::LoadSession(session_id) => {
+                let old_session_id = self.context_manager.session_id().to_string();
+                self.context_manager.switch_session(session_id);
+                if self.context_manager.load()? {
+                    println!(
+                        "{} 会话 {} 已加载",
+                        "成功".green(),
+                        self.context_manager.session_id()
+                    );
+                } else {
+                    println!(
+                        "{} 会话 {} 不存在，已创建新会话",
+                        "提示".yellow(),
+                        self.context_manager.session_id()
+                    );
+                }
+                println!(
+                    "{} 从 {} 切换到 {}",
+                    "提示".yellow(),
+                    old_session_id.cyan(),
+                    self.context_manager.session_id().cyan()
+                );
+            }
+            Command::DeleteSession => {
+                if self.context_manager.delete_session()? {
+                    println!(
+                        "{} 会话 {} 已删除",
+                        "成功".green(),
+                        self.context_manager.session_id()
+                    );
+                    let new_session_id = names::Generator::default().next().unwrap();
+                    self.context_manager.switch_session(new_session_id);
+                } else {
+                    println!("{} 会话文件不存在", "提示".yellow());
+                }
             }
             Command::Unknown(cmd) => {
                 println!("{} 未知命令: {}", "错误:".red(), cmd);
@@ -406,7 +619,7 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    let mut agent = Agent::new(config.clone());
+    let mut agent = Agent::new(config.clone()).context("创建 agent 失败")?;
 
     if !args.no_tui {
         return run_tui_mode(agent).await;
@@ -568,7 +781,7 @@ async fn run_tui_mode(agent: Agent) -> Result<()> {
                                             let result = agent.execute_tool(tool_call).await;
                                             match result {
                                                 Ok(result_str) => {
-                                                    agent.messages.push(
+                                                    agent.context_manager.add_message(
                                                         Message::tool_result(&tool_call.id, &result_str)
                                                     );
                                                     app_clone.write().await.update_tool_status(

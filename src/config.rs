@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use std::env;
 
-const API_URL: &str = "https://api.deepseek.com/v1/chat/completions";
-const MODEL: &str = "deepseek-chat";
-const MAX_TOKENS: u32 = 4096;
+const DEFAULT_API_URL: &str = "https://api.deepseek.com/v1/chat/completions";
+const DEFAULT_MODEL: &str = "deepseek-chat";
+const DEFAULT_MAX_TOKENS: u32 = 4096;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -17,28 +17,32 @@ impl Config {
     pub fn load() -> Result<Self> {
         dotenv::dotenv().ok();
 
-        let api_key = env::var("DEEPSEEK_API_KEY")
-            .context("未找到 DEEPSEEK_API_KEY 环境变量，请设置该变量后再运行程序")?;
+        let api_key = env::var("API_KEY")
+            .or_else(|_| env::var("DEEPSEEK_API_KEY"))
+            .context("未找到 API_KEY 或 DEEPSEEK_API_KEY 环境变量，请设置该变量后再运行程序")?;
+
+        let api_url = env::var("API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
+
+        let model = env::var("MODEL_NAME")
+            .or_else(|_| env::var("MODEL"))
+            .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+
+        let max_tokens = env::var("MAX_TOKENS")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(DEFAULT_MAX_TOKENS);
 
         Ok(Config {
             api_key,
-            api_url: API_URL.to_string(),
-            model: MODEL.to_string(),
-            max_tokens: MAX_TOKENS,
+            api_url,
+            model,
+            max_tokens,
         })
     }
 
     pub fn validate(&self) -> Result<()> {
         if self.api_key.is_empty() {
             anyhow::bail!("API Key 不能为空");
-        }
-
-        if !self.api_key.starts_with("sk-") {
-            anyhow::bail!("API Key 格式不正确，应以 'sk-' 开头");
-        }
-
-        if self.api_key.len() < 20 {
-            anyhow::bail!("API Key 长度不正确");
         }
 
         Ok(())
@@ -53,10 +57,10 @@ mod tests {
     #[test]
     fn test_config_validation_success() {
         let config = Config {
-            api_key: "sk-test12345678901234567890".to_string(),
-            api_url: API_URL.to_string(),
-            model: MODEL.to_string(),
-            max_tokens: MAX_TOKENS,
+            api_key: "test-key".to_string(),
+            api_url: DEFAULT_API_URL.to_string(),
+            model: DEFAULT_MODEL.to_string(),
+            max_tokens: DEFAULT_MAX_TOKENS,
         };
         assert!(config.validate().is_ok());
     }
@@ -65,43 +69,34 @@ mod tests {
     fn test_config_validation_empty_key() {
         let config = Config {
             api_key: "".to_string(),
-            api_url: API_URL.to_string(),
-            model: MODEL.to_string(),
-            max_tokens: MAX_TOKENS,
-        };
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn test_config_validation_invalid_prefix() {
-        let config = Config {
-            api_key: "invalid-key".to_string(),
-            api_url: API_URL.to_string(),
-            model: MODEL.to_string(),
-            max_tokens: MAX_TOKENS,
-        };
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn test_config_validation_too_short() {
-        let config = Config {
-            api_key: "sk-short".to_string(),
-            api_url: API_URL.to_string(),
-            model: MODEL.to_string(),
-            max_tokens: MAX_TOKENS,
+            api_url: DEFAULT_API_URL.to_string(),
+            model: DEFAULT_MODEL.to_string(),
+            max_tokens: DEFAULT_MAX_TOKENS,
         };
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_load_from_env() {
-        dotenv::dotenv().ok();
-        env::set_var("DEEPSEEK_API_KEY", "sk-test12345678901234567890");
+        env::set_var("API_KEY", "test-key");
         let result = Config::load();
         assert!(result.is_ok(), "Failed to load config: {:?}", result);
         let config = result.unwrap();
-        assert_eq!(config.api_key, "sk-test12345678901234567890");
+        assert_eq!(config.api_key, "test-key");
+        env::remove_var("API_KEY");
         env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_load_with_custom_model() {
+        dotenv::dotenv().ok();
+        env::set_var("API_KEY", "test-key");
+        env::set_var("MODEL", "custom-model");
+        let result = Config::load();
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.model, "custom-model");
+        env::remove_var("API_KEY");
+        env::remove_var("MODEL");
     }
 }
