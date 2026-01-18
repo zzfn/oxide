@@ -7,6 +7,55 @@ pub enum AppState {
     Error(String),
 }
 
+/// 布局模式 - 支持多种界面布局风格
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LayoutMode {
+    /// 标准模式：完整边框消息卡片
+    Standard,
+    /// 紧凑模式：简化消息格式，无边框
+    Compact,
+    /// 极简模式：最精简显示
+    Minimal,
+    /// 分屏模式：工具面板常驻
+    Split,
+}
+
+impl LayoutMode {
+    /// 循环切换到下一个布局模式
+    pub fn next(&self) -> Self {
+        match self {
+            LayoutMode::Standard => LayoutMode::Compact,
+            LayoutMode::Compact => LayoutMode::Minimal,
+            LayoutMode::Minimal => LayoutMode::Split,
+            LayoutMode::Split => LayoutMode::Standard,
+        }
+    }
+
+    /// 是否显示消息卡片边框
+    pub fn show_card_borders(&self) -> bool {
+        matches!(self, LayoutMode::Standard | LayoutMode::Split)
+    }
+
+    /// 是否显示帮助栏
+    pub fn show_help_bar(&self) -> bool {
+        !matches!(self, LayoutMode::Minimal)
+    }
+
+    /// 消息间距（行数）
+    pub fn message_spacing(&self) -> usize {
+        match self {
+            LayoutMode::Standard | LayoutMode::Split => 2,
+            LayoutMode::Compact => 1,
+            LayoutMode::Minimal => 0,
+        }
+    }
+
+    /// 是否常驻工具面板
+    pub fn always_show_tool_panel(&self) -> bool {
+        matches!(self, LayoutMode::Split)
+    }
+}
+
 pub const OXIDE_LOGO: &str = r#"
  ██╗  ██╗███████╗███╗   ██╗██████╗ ███████╗ ██████╗ ██████╗ ██████╗ ███████╗
  ██║  ██║██╔════╝████╗  ██║██╔══██╗██╔════╝██╔═══██╗██╔══██╗██╔══██╗██╔════╝
@@ -45,6 +94,7 @@ pub enum TuiEvent {
     Exit,
     Resize(u16, u16),
     Tick,
+    ToggleLayoutMode, // 新增：切换布局模式
 }
 
 pub struct App {
@@ -61,6 +111,7 @@ pub struct App {
     pub session_id: String,
     pub stream_chars_per_tick: usize,
     pub tick_count: u64,
+    pub layout_mode: LayoutMode, // 新增：当前布局模式
     dirty: bool,
     streaming_message: Option<StreamingMessage>,
 }
@@ -81,6 +132,7 @@ impl App {
             session_id,
             stream_chars_per_tick,
             tick_count: 0,
+            layout_mode: LayoutMode::Standard, // 默认标准模式
             dirty: true,
             streaming_message: None,
         }
@@ -187,7 +239,23 @@ impl App {
     }
 
     pub fn toggle_tool_panel(&mut self) {
-        self.show_tool_panel = !self.show_tool_panel;
+        // 在 Split 模式下，切换到其他模式
+        if self.layout_mode.always_show_tool_panel() {
+            self.layout_mode = LayoutMode::Standard;
+            self.show_tool_panel = false;
+        } else {
+            self.show_tool_panel = !self.show_tool_panel;
+        }
+        self.mark_dirty();
+    }
+
+    /// 切换布局模式
+    pub fn toggle_layout_mode(&mut self) {
+        self.layout_mode = self.layout_mode.next();
+        // 如果是 Split 模式，自动显示工具面板
+        if self.layout_mode.always_show_tool_panel() {
+            self.show_tool_panel = true;
+        }
         self.mark_dirty();
     }
 

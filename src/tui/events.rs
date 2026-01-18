@@ -76,6 +76,10 @@ pub fn handle_key_event(key: KeyEvent, tui_sender: &UnboundedSender<TuiEvent>) -
             tui_sender.send(TuiEvent::Exit)?;
             return Ok(true);
         }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            // M 键切换布局模式
+            tui_sender.send(TuiEvent::ToggleLayoutMode)?;
+        }
         KeyCode::Enter => {
             tui_sender.send(TuiEvent::SendMessage)?;
         }
