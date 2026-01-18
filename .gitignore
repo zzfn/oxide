@@ -1,0 +1,23 @@
+# Cargo
+/target/
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# AI Assistants
+.opencode/
+.claude/
+.agent/
+AGENTS.md
+CLAUDE.md

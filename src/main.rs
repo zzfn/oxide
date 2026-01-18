@@ -5,16 +5,24 @@ use colored::Colorize;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
 use std::env;
 
-const API_URL: &str = "https://api.anthropic.com/v1/messages";
-const MODEL: &str = "claude-3-5-sonnet-20241022";
+const API_URL: &str = "https://api.deepseek.com/v1/chat/completions";
+const MODEL: &str = "deepseek-chat";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum Content {
+    Text(String),
+    Array(Vec<ContentBlock>),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 enum ContentBlock {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -30,14 +38,39 @@ enum ContentBlock {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message {
     role: String,
-    content: Vec<ContentBlock>,
+    content: Content,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<ToolCall>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolCall {
+    id: String,
+    #[serde(rename = "type")]
+    call_type: String,
+    function: FunctionCall,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FunctionCall {
+    name: String,
+    arguments: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Tool {
+    #[serde(rename = "type")]
+    tool_type: String,
+    function: FunctionDefinition,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FunctionDefinition {
     name: String,
     description: String,
-    input_schema: serde_json::Value,
+    parameters: serde_json::Value,
 }
 
 struct Agent {
@@ -52,50 +85,59 @@ impl Agent {
         let client = Client::new();
         let tools = vec![
             Tool {
-                name: "read_file".to_string(),
-                description: "读取文件内容".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "文件路径"
-                        }
-                    },
-                    "required": ["path"]
-                }),
-            },
-            Tool {
-                name: "write_file".to_string(),
-                description: "写入文件内容，如果目录不存在会自动创建".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "文件路径"
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "read_file".to_string(),
+                    description: "读取文件内容".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "文件路径"
+                            }
                         },
-                        "content": {
-                            "type": "string",
-                            "description": "文件内容"
-                        }
-                    },
-                    "required": ["path", "content"]
-                }),
+                        "required": ["path"]
+                    }),
+                },
             },
             Tool {
-                name: "shell_execute".to_string(),
-                description: "在终端执行 Shell 命令".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string",
-                            "description": "要执行的命令"
-                        }
-                    },
-                    "required": ["command"]
-                }),
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "write_file".to_string(),
+                    description: "写入文件内容，如果目录不存在会自动创建".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "文件路径"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "文件内容"
+                            }
+                        },
+                        "required": ["path", "content"]
+                    }),
+                },
+            },
+            Tool {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "shell_execute".to_string(),
+                    description: "在终端执行 Shell 命令".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "要执行的命令"
+                            }
+                        },
+                        "required": ["command"]
+                    }),
+                },
             },
         ];
 
@@ -110,9 +152,9 @@ impl Agent {
     async fn add_user_message(&mut self, text: &str) {
         self.messages.push(Message {
             role: "user".to_string(),
-            content: vec![ContentBlock::Text {
-                text: text.to_string(),
-            }],
+            content: Content::Text(text.to_string()),
+            tool_call_id: None,
+            tool_calls: None,
         });
     }
 
@@ -127,8 +169,7 @@ impl Agent {
         let response = self
             .client
             .post(API_URL)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
+            .header("Authorization", format!("Bearer {}", &self.api_key))
             .header("content-type", "application/json")
             .json(&request_body)
             .send()
@@ -141,16 +182,49 @@ impl Agent {
         }
 
         let response_json: serde_json::Value = response.json().await?;
-        let assistant_content: Vec<ContentBlock> =
-            serde_json::from_value(response_json["content"].clone())?;
+        let assistant_msg = &response_json["choices"][0]["message"];
+
+        let mut content_blocks = Vec::new();
+
+        if let Some(content) = assistant_msg.get("content").and_then(|c| c.as_str()) {
+            content_blocks.push(ContentBlock::Text {
+                text: content.to_string(),
+            });
+        }
+
+        if let Some(tool_calls) = assistant_msg.get("tool_calls").and_then(|tc| tc.as_array()) {
+            for tool_call in tool_calls {
+                if let (Some(id), Some(func)) = (
+                    tool_call.get("id").and_then(|i| i.as_str()),
+                    tool_call.get("function"),
+                ) {
+                    if let (Some(name), Some(args)) = (
+                        func.get("name").and_then(|n| n.as_str()),
+                        func.get("arguments").and_then(|a| a.as_str()),
+                    ) {
+                        let input: serde_json::Value = serde_json::from_str(args)
+                            .unwrap_or_else(|_| serde_json::Value::String(args.to_string()));
+                        content_blocks.push(ContentBlock::ToolUse {
+                            id: id.to_string(),
+                            name: name.to_string(),
+                            input,
+                        });
+                    }
+                }
+            }
+        }
 
         let assistant_message = Message {
             role: "assistant".to_string(),
-            content: assistant_content.clone(),
+            content: Content::Array(content_blocks.clone()),
+            tool_call_id: None,
+            tool_calls: assistant_msg
+                .get("tool_calls")
+                .and_then(|tc| serde_json::from_value(tc.clone()).ok()),
         };
         self.messages.push(assistant_message);
 
-        Ok(assistant_content)
+        Ok(content_blocks)
     }
 
     async fn execute_tool(&self, tool_use: &ContentBlock) -> Result<ContentBlock> {
@@ -158,24 +232,16 @@ impl Agent {
             ContentBlock::ToolUse { id, name, input } => {
                 let result = match name.as_str() {
                     "read_file" => {
-                        let path = input["path"]
-                            .as_str()
-                            .context("缺少 path 参数")?;
+                        let path = input["path"].as_str().context("缺少 path 参数")?;
                         tools::read_file(path)?
                     }
                     "write_file" => {
-                        let path = input["path"]
-                            .as_str()
-                            .context("缺少 path 参数")?;
-                        let content = input["content"]
-                            .as_str()
-                            .context("缺少 content 参数")?;
+                        let path = input["path"].as_str().context("缺少 path 参数")?;
+                        let content = input["content"].as_str().context("缺少 content 参数")?;
                         tools::write_file(path, content)?
                     }
                     "shell_execute" => {
-                        let command = input["command"]
-                            .as_str()
-                            .context("缺少 command 参数")?;
+                        let command = input["command"].as_str().context("缺少 command 参数")?;
                         tools::shell_execute(command)?
                     }
                     _ => anyhow::bail!("未知工具: {}", name),
@@ -207,11 +273,7 @@ impl Agent {
                     }
                     ContentBlock::ToolUse { name, input, .. } => {
                         has_tool_use = true;
-                        println!(
-                            "{} {}",
-                            "[Tool]".yellow(),
-                            name.bold()
-                        );
+                        println!("{} {}", "[Tool]".yellow(), name.bold());
                         println!("{}", input.to_string().dimmed());
 
                         let result = self.execute_tool(block).await?;
@@ -222,10 +284,21 @@ impl Agent {
             }
 
             if has_tool_use {
-                self.messages.push(Message {
-                    role: "user".to_string(),
-                    content: tool_results,
-                });
+                for result in &tool_results {
+                    if let ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error: _,
+                    } = result
+                    {
+                        self.messages.push(Message {
+                            role: "tool".to_string(),
+                            content: Content::Text(content.clone()),
+                            tool_call_id: Some(tool_use_id.clone()),
+                            tool_calls: None,
+                        });
+                    }
+                }
             } else {
                 break;
             }
@@ -239,12 +312,11 @@ impl Agent {
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let api_key = env::var("ANTHROPIC_API_KEY")
-        .context("未设置 ANTHROPIC_API_KEY 环境变量")?;
+    let api_key = env::var("DEEPSEEK_API_KEY").context("未设置 DEEPSEEK_API_KEY 环境变量")?;
 
     let mut agent = Agent::new(api_key);
 
-    println!("{} Oxide CLI - Claude 3.5 Sonnet Agent", "=".repeat(40).cyan());
+    println!("{} Oxide CLI - DeepSeek Agent", "=".repeat(40).cyan());
     println!("{} 输入 /exit 退出\n", "提示:".yellow());
 
     loop {
