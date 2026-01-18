@@ -679,6 +679,7 @@ async fn run_tui_mode(agent: Agent) -> Result<()> {
 
     let app = Arc::new(RwLock::new(crate::tui::App::new(
         agent.config.model.to_string(),
+        agent.context_manager.session_id().to_string(),
     )));
     app.write().await.set_event_sender(tui_tx.clone());
 
@@ -696,6 +697,13 @@ async fn run_tui_mode(agent: Agent) -> Result<()> {
             event = event_handler.receiver.recv() => {
                 match event {
                     Some(crate::tui::Event::Input(key)) => {
+                        let is_welcome = app.read().await.show_welcome;
+
+                        if is_welcome {
+                            app.write().await.show_welcome = false;
+                            continue;
+                        }
+
                         if key.code == crossterm::event::KeyCode::Char('c') &&
                            key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
                             break Ok(());

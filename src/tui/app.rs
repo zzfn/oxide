@@ -7,6 +7,15 @@ pub enum AppState {
     Error(String),
 }
 
+pub const OXIDE_LOGO: &str = r#"
+ ██╗  ██╗███████╗███╗   ██╗██████╗ ███████╗ ██████╗ ██████╗ ██████╗ ███████╗
+ ██║  ██║██╔════╝████╗  ██║██╔══██╗██╔════╝██╔═══██╗██╔══██╗██╔══██╗██╔════╝
+ ███████║█████╗  ██╔██╗ ██║██║  ██║███████╗██║   ██║██████╔╝██║  ██║█████╗  
+ ██╔══██║██╔══╝  ██║╚██╗██║██║  ██║╚════██║██║   ██║██╔══██╗██║  ██║██╔══╝  
+ ██║  ██║███████╗██║ ╚████║██████╔╝███████║╚██████╔╝██║  ██║██████╔╝███████╗
+ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝
+"#;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageType {
     User,
@@ -47,10 +56,12 @@ pub struct App {
     pub event_sender: Option<UnboundedSender<TuiEvent>>,
     pub tool_status: Vec<(String, String)>,
     pub show_tool_panel: bool,
+    pub show_welcome: bool,
+    pub session_id: String,
 }
 
 impl App {
-    pub fn new(model: String) -> Self {
+    pub fn new(model: String, session_id: String) -> Self {
         App {
             messages: Vec::new(),
             input: String::new(),
@@ -61,6 +72,8 @@ impl App {
             event_sender: None,
             tool_status: Vec::new(),
             show_tool_panel: false,
+            show_welcome: true,
+            session_id,
         }
     }
 
