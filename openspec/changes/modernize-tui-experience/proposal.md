@@ -15,13 +15,18 @@
 - **MODIFIED**: 简化界面设计，减少不必要的边框和装饰元素
 - **MODIFIED**: 改进工具状态展示，提供实时、清晰的视觉反馈
 - **MODIFIED**: 优化交互体验，消除闪烁，实现流畅滚动
+- **ADDED**: 新增消息卡片设计（使用 `╭─╮│╰─╯` 轻量边框）
+- **ADDED**: 新增主题系统（支持 dark/light/high_contrast 和自定义主题）
+- **ADDED**: 新增布局模式切换（Standard/Compact/Minimal/Split）
+- **ADDED**: 新增交互功能（帮助系统、命令历史、多行输入、消息搜索）
 - **ADDED**: 新增实时打字效果（typewriter effect）用于 AI 响应
 - **ADDED**: 新增进度指示器和加载动画
-- **ADDED**: 新增更直观的工具执行状态可视化
+- **ADDED**: 新增工具状态内嵌到消息流（替代独立面板）
 
 ## Impact
 - Affected specs: `cli-core` (交互式对话需求), `tui` (TUI 体验需求)
-- Affected code: `src/tui/ui.rs` (渲染逻辑), `src/tui/app.rs` (状态管理), `src/main.rs` (主循环)
-- 新增依赖: 可能需要添加更多 ratatui 相关组件或主题库
+- Affected code: `src/tui/ui.rs` (渲染逻辑), `src/tui/app.rs` (状态管理), `src/tui/theme.rs` (新增主题系统), `src/main.rs` (主循环)
+- 新增依赖: `toml` (主题配置), 可能需要 `pulldown-cmark` (增强 Markdown 渲染)
 - **BREAKING**: 移除非 TUI 模式支持，TUI 成为唯一 UI
 - 移除 `--no-tui` 参数及相关逻辑
+- 新增配置文件: `~/.config/oxide/theme.toml` (用户自定义主题)
