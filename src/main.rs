@@ -1,7 +1,11 @@
 mod config;
 mod tools;
 
+#[cfg(feature = "tui")]
+mod tui;
+
 use anyhow::{Context, Result};
+use clap::Parser;
 use colored::Colorize;
 use config::Config;
 use reqwest::Client;
@@ -10,6 +14,14 @@ use serde_json::json;
 use std::io::Write;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Parser, Debug)]
+#[command(name = "oxide")]
+#[command(about = "Oxide CLI - DeepSeek Agent", long_about = None)]
+struct Args {
+    #[arg(long, help = "禁用 TUI 界面，使用简单终端模式")]
+    no_tui: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message {
@@ -124,8 +136,8 @@ enum AssistantResponse {
 
 struct Agent {
     client: Client,
-    config: Config,
-    messages: Vec<Message>,
+    pub config: Config,
+    pub messages: Vec<Message>,
     tools: Vec<Tool>,
     message_count: usize,
 }
@@ -381,6 +393,7 @@ impl Agent {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
     let config = Config::load().context("加载配置失败")?;
 
     if let Err(e) = config.validate() {
@@ -393,7 +406,12 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    let mut agent = Agent::new(config);
+    let mut agent = Agent::new(config.clone());
+
+    if !args.no_tui {
+        return run_tui_mode(agent).await;
+    }
+
     agent.display_welcome();
 
     loop {
@@ -425,4 +443,201 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn run_tui_mode(agent: Agent) -> Result<()> {
+    use crossterm::{
+        cursor::Hide,
+        event::{DisableMouseCapture, EnableMouseCapture},
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    };
+    use ratatui::{backend::CrosstermBackend, Terminal};
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    enable_raw_mode()?;
+    let mut stdout = std::io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture, Hide)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let (tui_tx, mut tui_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let app = Arc::new(RwLock::new(crate::tui::App::new(
+        agent.config.model.to_string(),
+    )));
+    app.write().await.set_event_sender(tui_tx.clone());
+
+    let agent_shared = Arc::new(RwLock::new(agent));
+
+    let mut event_handler = crate::tui::EventHandler::new(250);
+
+    let result = loop {
+        {
+            let app_ref = app.read().await;
+            terminal.draw(|f| crate::tui::render(f, &*app_ref)).unwrap();
+        }
+
+        tokio::select! {
+            event = event_handler.receiver.recv() => {
+                match event {
+                    Some(crate::tui::Event::Input(key)) => {
+                        if key.code == crossterm::event::KeyCode::Char('c') &&
+                           key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                            break Ok(());
+                        }
+
+                        let should_exit = crate::tui::handle_key_event(key, &tui_tx)?;
+                        if should_exit {
+                            break Ok(());
+                        }
+                    }
+                    Some(crate::tui::Event::Resize(_, _)) => {
+                        let app_ref = app.read().await;
+                        terminal.draw(|f| crate::tui::render(f, &*app_ref)).unwrap();
+                    }
+                    Some(crate::tui::Event::Tick) => {
+                    }
+                    _ => {}
+                }
+            }
+            Some(tui_event) = tui_rx.recv() => {
+                match tui_event {
+                    crate::tui::TuiEvent::Exit => {
+                        break Ok(());
+                    }
+                    crate::tui::TuiEvent::Input(input) => {
+                        app.write().await.append_input(input.chars().next().unwrap());
+                    }
+                    crate::tui::TuiEvent::SendMessage => {
+                        let input = app.read().await.get_input();
+                        if input.is_empty() {
+                            continue;
+                        }
+
+                        if let Some(command) = Command::parse(&input) {
+                            app.write().await.clear_input();
+                            match command {
+                                Command::Exit => {
+                                    break Ok(());
+                                }
+                                Command::Clear => {
+                                    app.write().await.clear_messages();
+                                    continue;
+                                }
+                                _ => {
+                                    continue;
+                                }
+                            }
+                        }
+
+                        app.write().await.add_message(crate::tui::MessageType::User, input.clone());
+                        app.write().await.clear_input();
+                        app.write().await.set_state(crate::tui::AppState::Processing);
+
+                        let input_clone = input.clone();
+                        let agent_shared_clone = agent_shared.clone();
+                        let app_clone = app.clone();
+
+                        tokio::spawn(async move {
+                            let mut agent = agent_shared_clone.write().await;
+                            agent.add_user_message(&input_clone).await;
+
+                            loop {
+                                let response = agent.send_message().await;
+                                match response {
+                                    Ok(AssistantResponse::Text(text)) => {
+                                        app_clone.write().await.add_message(
+                                            crate::tui::MessageType::Assistant,
+                                            text.clone()
+                                        );
+                                        break;
+                                    }
+                                    Ok(AssistantResponse::ToolCalls(tool_calls)) => {
+                                        for tool_call in &tool_calls {
+                                            app_clone.write().await.update_tool_status(
+                                                tool_call.function.name.clone(),
+                                                "执行中...".to_string()
+                                            );
+                                            app_clone.write().await.add_tool_message(
+                                                &tool_call.function.name,
+                                                tool_call.function.arguments.clone()
+                                            );
+
+                                            let result = agent.execute_tool(tool_call).await;
+                                            match result {
+                                                Ok(result_str) => {
+                                                    agent.messages.push(
+                                                        Message::tool_result(&tool_call.id, &result_str)
+                                                    );
+                                                    app_clone.write().await.update_tool_status(
+                                                        tool_call.function.name.clone(),
+                                                        "成功".to_string()
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    app_clone.write().await.update_tool_status(
+                                                        tool_call.function.name.clone(),
+                                                        format!("失败: {}", e)
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app_clone.write().await.set_state(
+                                            crate::tui::AppState::Error(e.to_string())
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+                            app_clone.write().await.set_state(crate::tui::AppState::Normal);
+                        });
+                    }
+                    crate::tui::TuiEvent::NavigateUp => {
+                        app.write().await.scroll_up(5);
+                    }
+                    crate::tui::TuiEvent::NavigateDown => {
+                        app.write().await.scroll_down(5);
+                    }
+                    crate::tui::TuiEvent::PageUp => {
+                        app.write().await.scroll_up(20);
+                    }
+                    crate::tui::TuiEvent::PageDown => {
+                        app.write().await.scroll_down(20);
+                    }
+                    crate::tui::TuiEvent::ScrollToTop => {
+                        app.write().await.scroll_to_top();
+                    }
+                    crate::tui::TuiEvent::ScrollToBottom => {
+                        app.write().await.scroll_to_bottom();
+                    }
+                    crate::tui::TuiEvent::Command(cmd) => {
+                        if cmd == "/toggle-tools" {
+                            app.write().await.toggle_tool_panel();
+                        }
+                    }
+                    crate::tui::TuiEvent::Resize(_, _) => {
+                        let app_ref = app.read().await;
+                        terminal.draw(|f| crate::tui::render(f, &*app_ref)).unwrap();
+                    }
+                    crate::tui::TuiEvent::Tick => {
+                    }
+                }
+            }
+        }
+    };
+
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture,
+        crossterm::cursor::Show
+    )?;
+    terminal.show_cursor()?;
+
+    result
 }

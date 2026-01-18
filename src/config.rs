@@ -5,7 +5,7 @@ const API_URL: &str = "https://api.deepseek.com/v1/chat/completions";
 const MODEL: &str = "deepseek-chat";
 const MAX_TOKENS: u32 = 4096;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub api_key: String,
     pub api_url: String,
