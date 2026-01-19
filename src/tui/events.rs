@@ -1,6 +1,6 @@
 use crate::tui::TuiEvent;
 use anyhow::Result;
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
@@ -8,6 +8,7 @@ use tokio::sync::mpsc::UnboundedSender;
 #[derive(Clone, Copy)]
 pub enum Event {
     Input(KeyEvent),
+    Mouse(MouseEvent),
     Tick,
     Resize(u16, u16),
 }
@@ -33,16 +34,25 @@ impl EventHandler {
 
                 if crossterm::event::poll(timeout).expect("poll works") {
                     if let Ok(ev) = crossterm::event::read() {
-                        if let CrosstermEvent::Key(key) = ev {
-                            if key.kind == event::KeyEventKind::Press {
-                                if sender_clone.send(Event::Input(key)).is_err() {
+                        match ev {
+                            CrosstermEvent::Key(key) => {
+                                if key.kind == event::KeyEventKind::Press {
+                                    if sender_clone.send(Event::Input(key)).is_err() {
+                                        return;
+                                    }
+                                }
+                            }
+                            CrosstermEvent::Mouse(mouse) => {
+                                if sender_clone.send(Event::Mouse(mouse)).is_err() {
                                     return;
                                 }
                             }
-                        } else if let CrosstermEvent::Resize(width, height) = ev {
-                            if sender_clone.send(Event::Resize(width, height)).is_err() {
-                                return;
+                            CrosstermEvent::Resize(width, height) => {
+                                if sender_clone.send(Event::Resize(width, height)).is_err() {
+                                    return;
+                                }
                             }
+                            _ => {}
                         }
                     }
                 }
@@ -111,6 +121,19 @@ pub fn handle_key_event(key: KeyEvent, tui_sender: &UnboundedSender<TuiEvent>) -
         }
         KeyCode::Char(c) => {
             tui_sender.send(TuiEvent::Input(c.to_string()))?;
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+pub fn handle_mouse_event(mouse: MouseEvent, tui_sender: &UnboundedSender<TuiEvent>) -> Result<bool> {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            tui_sender.send(TuiEvent::NavigateUp)?;
+        }
+        MouseEventKind::ScrollDown => {
+            tui_sender.send(TuiEvent::NavigateDown)?;
         }
         _ => {}
     }

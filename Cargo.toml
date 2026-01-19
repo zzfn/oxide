@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["tui"]
+default = ["cli"]
+cli = ["rustyline", "colored"]
 tui = ["ratatui", "crossterm", "syntect"]
 
 [dependencies]
@@ -21,6 +22,8 @@ walkdir = "2.0"
 ignore = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 names = { version = "0.14.0", default-features = false }
+rustyline = { version = "14.0", optional = true }
+colored = { version = "3.0", optional = true }
 ratatui = { version = "0.30", optional = true }
 crossterm = { version = "0.29", optional = true }
 syntect = { version = "5.1", optional = true }

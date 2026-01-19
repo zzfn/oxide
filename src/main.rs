@@ -2,10 +2,14 @@ mod config;
 mod context;
 mod tools;
 
+#[cfg(feature = "cli")]
+mod cli;
+
 #[cfg(feature = "tui")]
 mod tui;
 
 use anyhow::{Context, Result};
+use colored::Colorize;
 use config::Config;
 use context::{ContextManager, FunctionCall, Message, ToolCall};
 use reqwest::Client;
@@ -398,9 +402,128 @@ async fn main() -> Result<()> {
     }
 
     let agent = Agent::new(config.clone()).context("创建 agent 失败")?;
-    run_tui_mode(agent).await
+
+    // 根据 feature 选择运行模式
+    #[cfg(feature = "cli")]
+    {
+        run_cli_mode(agent).await
+    }
+
+    #[cfg(all(feature = "tui", not(feature = "cli")))]
+    {
+        run_tui_mode(agent).await
+    }
+
+    #[cfg(not(any(feature = "cli", feature = "tui")))]
+    {
+        eprintln!("错误: 请启用至少一个功能特性 (cli 或 tui)");
+        eprintln!("提示: 使用 --features cli 或 --features tui");
+        std::process::exit(1);
+    }
 }
 
+#[cfg(feature = "cli")]
+async fn run_cli_mode(mut agent: Agent) -> Result<()> {
+    // 创建 CLI 实例，传入 context_manager
+    let context_manager = agent.context_manager.clone();
+    let mut cli = cli::OxideCli::new(context_manager);
+
+    // 主循环
+    use rustyline::error::ReadlineError;
+    use rustyline::Editor;
+
+    let mut rl = Editor::new()?;
+    rl.set_helper(Some(cli::OxideHelper::default()));
+
+    loop {
+        cli.print_separator()?;
+        let readline = rl.readline("❯ ");
+
+        match readline {
+            Ok(line) => {
+                let input = line.trim();
+                if input.is_empty() {
+                    continue;
+                }
+
+                let _ = rl.add_history_entry(input);
+                cli.print_separator()?;
+
+                // 处理命令
+                let should_continue = cli.handle_command(input).await?;
+                if !should_continue {
+                    break;
+                }
+
+                // 如果不是命令，则是用户消息
+                if !input.starts_with('/') {
+                    // 添加用户消息到上下文
+                    agent.add_user_message(input).await;
+
+                    println!("{}", "🧠 Thinking...".yellow());
+                    println!("{}", "● oxide:".blue());
+
+                    // 处理 AI 响应（可能包含工具调用）
+                    loop {
+                        match agent.send_message().await? {
+                            crate::AssistantResponse::Text(text) => {
+                                println!("{}", text);
+                                break;
+                            }
+                            crate::AssistantResponse::ToolCalls(tool_calls) => {
+                                for tool_call in &tool_calls {
+                                    println!(
+                                        "{} {}",
+                                        "🔧".bright_yellow(),
+                                        tool_call.function.name.bright_white()
+                                    );
+                                    println!(
+                                        "{}",
+                                        tool_call.function.arguments.dimmed()
+                                    );
+
+                                    let result = agent.execute_tool(tool_call).await?;
+                                    agent.context_manager.add_message(Message::tool_result(
+                                        &tool_call.id,
+                                        &result,
+                                    ));
+                                    println!(
+                                        "{} {}",
+                                        "✓".bright_green(),
+                                        "Success".bright_green()
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    println!();
+
+                    // 保存会话
+                    if let Err(e) = agent.context_manager.save() {
+                        println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("{}", "^C".dimmed());
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                break;
+            }
+            Err(err) => {
+                println!("{} {:?}", "Error:".red(), err);
+                break;
+            }
+        }
+    }
+
+    println!("\n{}", "👋 Goodbye!".bright_cyan());
+    Ok(())
+}
+
+#[cfg(feature = "tui")]
 async fn run_tui_mode(agent: Agent) -> Result<()> {
     use crossterm::{
         cursor::Hide,
@@ -473,6 +596,9 @@ async fn run_tui_mode(agent: Agent) -> Result<()> {
                         if should_exit {
                             break Ok(());
                         }
+                    }
+                    Some(crate::tui::Event::Mouse(mouse)) => {
+                        crate::tui::handle_mouse_event(mouse, &tui_tx)?;
                     }
                     Some(crate::tui::Event::Resize(_, _)) => {
                         app.write().await.mark_dirty();

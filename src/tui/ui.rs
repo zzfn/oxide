@@ -328,8 +328,33 @@ fn render_messages_simple(frame: &mut Frame, app: &App, area: Rect) {
         all_lines.push(Line::from(""));
     }
 
-    let paragraph = Paragraph::new(all_lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, area);
+    // 计算可见区域高度
+    let visible_height = area.height as usize;
+
+    // 根据滚动偏移量显示内容
+    // scroll_offset 为 0 时显示最新消息（底部）
+    // scroll_offset 越大，显示越早的消息
+    let total_lines = all_lines.len();
+
+    if total_lines > visible_height {
+        // 计算实际显示的起始位置
+        // 当 scroll_offset = 0 时，显示最后 visible_height 行
+        // 当 scroll_offset > 0 时，向上滚动 scroll_offset 行
+        let start = if app.scroll_offset == 0 {
+            total_lines.saturating_sub(visible_height)
+        } else {
+            app.scroll_offset.min(total_lines.saturating_sub(visible_height))
+        };
+
+        let end = (start + visible_height).min(total_lines);
+        let visible_lines: Vec<_> = all_lines[start..end].to_vec();
+
+        let paragraph = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, area);
+    } else {
+        let paragraph = Paragraph::new(all_lines).wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, area);
+    }
 }
 
 /// kota 风格的简化输入框
