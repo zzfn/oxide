@@ -58,6 +58,7 @@ pub struct App {
     pub tool_status: Vec<(String, String)>,
     pub show_tool_panel: bool,
     pub show_welcome: bool,
+    pub welcome_banner: Option<String>,
     pub session_id: String,
     pub stream_chars_per_tick: usize,
     pub tick_count: u64,
@@ -67,6 +68,18 @@ pub struct App {
 
 impl App {
     pub fn new(model: String, session_id: String, stream_chars_per_tick: usize) -> Self {
+        let cwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let welcome_banner = format!(
+            "✨ Welcome to Oxide CLI {}  cwd: {} │ model: {} │ session: {}",
+            env!("CARGO_PKG_VERSION"),
+            cwd,
+            model,
+            session_id
+        );
+
         App {
             messages: Vec::new(),
             input: String::new(),
@@ -78,6 +91,7 @@ impl App {
             tool_status: Vec::new(),
             show_tool_panel: false,
             show_welcome: false,
+            welcome_banner: Some(welcome_banner),
             session_id,
             stream_chars_per_tick,
             tick_count: 0,
