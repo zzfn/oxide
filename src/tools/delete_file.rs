@@ -1,23 +1,119 @@
-use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use super::FileToolError;
+use colored::*;
+use rig::{completion::ToolDefinition, tool::Tool};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-pub fn delete_file(path: &str) -> Result<Value> {
-    let path = Path::new(path);
+#[derive(Deserialize)]
+pub struct DeleteFileArgs {
+    pub file_path: String,
+}
 
-    if !path.exists() {
-        anyhow::bail!("文件不存在: {}", path.display());
+#[derive(Serialize, Debug)]
+pub struct DeleteFileOutput {
+    pub file_path: String,
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct DeleteFileTool;
+
+impl Tool for DeleteFileTool {
+    const NAME: &'static str = "delete_file";
+
+    type Error = FileToolError;
+    type Args = DeleteFileArgs;
+    type Output = DeleteFileOutput;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "delete_file".to_string(),
+            description: "Delete a file from the filesystem. The file must exist and be a regular file (not a directory).".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path to the file to delete (relative or absolute)."
+                    }
+                },
+                "required": ["file_path"]
+            })
+        }
     }
 
-    if path.is_dir() {
-        fs::remove_dir_all(path).with_context(|| format!("无法删除目录: {}", path.display()))?;
-    } else {
-        fs::remove_file(path).with_context(|| format!("无法删除文件: {}", path.display()))?;
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let file_path = &args.file_path;
+        let path = Path::new(file_path);
+
+        // Check if file exists
+        if !path.exists() {
+            return Err(FileToolError::FileNotFound(file_path.clone()));
+        }
+
+        // Check if it's actually a file (not a directory)
+        if !path.is_file() {
+            return Err(FileToolError::NotAFile(file_path.clone()));
+        }
+
+        // Try to delete the file
+        match fs::remove_file(file_path) {
+            Ok(()) => Ok(DeleteFileOutput {
+                file_path: file_path.clone(),
+                success: true,
+                message: format!("Successfully deleted file '{}'", file_path),
+            }),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    Err(FileToolError::PermissionDenied(file_path.clone()))
+                }
+                _ => Err(FileToolError::Io(e)),
+            },
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct WrappedDeleteFileTool {
+    inner: DeleteFileTool,
+}
+
+impl WrappedDeleteFileTool {
+    pub fn new() -> Self {
+        Self {
+            inner: DeleteFileTool,
+        }
+    }
+}
+
+impl Tool for WrappedDeleteFileTool {
+    const NAME: &'static str = "delete_file";
+
+    type Error = FileToolError;
+    type Args = <DeleteFileTool as Tool>::Args;
+    type Output = <DeleteFileTool as Tool>::Output;
+
+    async fn definition(&self, prompt: String) -> ToolDefinition {
+        self.inner.definition(prompt).await
     }
 
-    Ok(json!({
-        "result": format!("已删除: {}", path.display()),
-        "error": null
-    }))
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        println!();
+        println!("{} {}({})", "●".bright_green(), "Delete", args.file_path);
+
+        let result = self.inner.call(args).await;
+
+        match &result {
+            Ok(_output) => {
+                println!("  └─ {}", "File deleted".dimmed());
+            }
+            Err(e) => {
+                println!("  └─ {}", format!("Error: {}", e).red());
+            }
+        }
+        println!();
+        result
+    }
 }
