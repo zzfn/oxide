@@ -48,6 +48,9 @@ impl From<ToolCallResponse> for ToolCall {
 enum Command {
     Exit,
     Clear,
+    Help,
+    Config,
+    ToggleTools,
     Unknown(String),
 }
 
@@ -65,6 +68,9 @@ impl Command {
         match parts[0] {
             "/exit" | "/quit" => Some(Command::Exit),
             "/clear" => Some(Command::Clear),
+            "/help" => Some(Command::Help),
+            "/config" => Some(Command::Config),
+            "/toggle-tools" => Some(Command::ToggleTools),
             _ => Some(Command::Unknown(parts[0].to_string())),
         }
     }
@@ -400,22 +406,28 @@ async fn run_tui_mode(agent: Agent) -> Result<()> {
         cursor::Hide,
         event::{DisableMouseCapture, EnableMouseCapture},
         execute,
-        terminal::{disable_raw_mode, enable_raw_mode, size},
+        terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
     };
-    use ratatui::{backend::CrosstermBackend, Terminal, TerminalOptions, Viewport};
+    use ratatui::{
+        backend::CrosstermBackend,
+        Terminal,
+        TerminalOptions,
+        Viewport,
+    };
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnableMouseCapture, Hide)?;
+    execute!(stdout, Clear(ClearType::All))?;  // 清屏
     let backend = CrosstermBackend::new(stdout);
-    let (_cols, rows) = size().unwrap_or((0, 0));
-    let inline_height = rows.saturating_sub(2).max(10);
+
+    // 明确使用全屏 viewport
     let mut terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Inline(inline_height),
+            viewport: Viewport::Fullscreen,
         },
     )?;
 
@@ -427,6 +439,11 @@ async fn run_tui_mode(agent: Agent) -> Result<()> {
         agent.config.stream_chars_per_tick,
     )));
     app.write().await.set_event_sender(tui_tx.clone());
+
+    // 保存配置信息用于命令显示
+    let api_url = agent.config.api_url.clone();
+    let model_name = agent.config.model.clone();
+    let max_tokens = agent.config.max_tokens;
 
     let agent_shared = Arc::new(RwLock::new(agent));
 
@@ -493,7 +510,44 @@ async fn run_tui_mode(agent: Agent) -> Result<()> {
                                     app.write().await.clear_messages();
                                     continue;
                                 }
-                                _ => {
+                                Command::Help => {
+                                    let help_text = r#"
+📚 Available Commands:
+
+  /exit或/quit   - Exit the application
+  /clear         - Clear all messages
+  /config        - Show current model configuration
+  /toggle-tools  - Toggle tool panel
+  /help          - Show this help message
+
+💡 You can also type any message to chat with the AI!
+"#;
+                                    app.write().await.add_message(
+                                        crate::tui::MessageType::Assistant,
+                                        help_text.to_string()
+                                    );
+                                    continue;
+                                }
+                                Command::Config => {
+                                    let config_text = format!(
+                                        "⚙️  Current Configuration:\n  API URL: {}\n  Model: {}\n  Max Tokens: {}",
+                                        api_url, model_name, max_tokens
+                                    );
+                                    app.write().await.add_message(
+                                        crate::tui::MessageType::Assistant,
+                                        config_text
+                                    );
+                                    continue;
+                                }
+                                Command::ToggleTools => {
+                                    app.write().await.toggle_tool_panel();
+                                    continue;
+                                }
+                                Command::Unknown(cmd) => {
+                                    app.write().await.add_message(
+                                        crate::tui::MessageType::Assistant,
+                                        format!("❌ Unknown command: {}\n💡 Type /help for available commands", cmd)
+                                    );
                                     continue;
                                 }
                             }
