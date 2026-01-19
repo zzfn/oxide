@@ -589,9 +589,6 @@ async fn run_tui_mode(agent: Agent) -> Result<()> {
                             app.write().await.toggle_tool_panel();
                         }
                     }
-                    crate::tui::TuiEvent::ToggleLayoutMode => {
-                        app.write().await.toggle_layout_mode();
-                    }
                     crate::tui::TuiEvent::Resize(_, _) => {
                         app.write().await.mark_dirty();
                     }

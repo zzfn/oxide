@@ -15,29 +15,23 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
 
-    // 计算帮助栏高度
-    let help_height = if app.layout_mode.show_help_bar() { 1 } else { 0 };
+    // 固定显示帮助栏
+    let help_height = 1;
 
-    // 主布局分割
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),                      // 状态栏
-            Constraint::Min(0),                         // 消息区域
-            Constraint::Length(3),                      // 输入框
-            Constraint::Length(help_height),           // 帮助栏（可选）
+            Constraint::Length(1),           // 状态栏（从 3 改为 1）
+            Constraint::Min(0),              // 消息区域
+            Constraint::Length(1),           // 输入框（从 3 改为 1）
+            Constraint::Length(help_height), // 帮助栏
         ])
         .split(size);
 
-    // 渲染各个组件
     render_status_bar(frame, app, main_chunks[0]);
     render_messages(frame, app, main_chunks[1]);
     render_input_box(frame, app, main_chunks[2]);
-
-    // 帮助栏（如果需要）
-    if help_height > 0 {
-        render_help_bar(frame, app, main_chunks[3]);
-    }
+    render_help_bar(frame, app, main_chunks[3]);
 
     // 工具面板（如果需要）
     if app.show_tool_panel {
@@ -78,10 +72,6 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("会话 ", Style::default().fg(Color::DarkGray)),
             Span::styled(app.session_id.clone(), Style::default().fg(Color::Magenta)),
         ]),
-        Line::from(vec![
-            Span::styled("布局 ", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{:?}", app.layout_mode), Style::default().fg(Color::Green)),
-        ]),
     ];
 
     let welcome_paragraph = Paragraph::new(welcome_text).alignment(Alignment::Center);
@@ -92,7 +82,7 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("输入内容后回车发送", Style::default().fg(Color::Gray)),
         ]),
         Line::from(vec![
-            Span::styled("M 切换布局  Ctrl+T 工具面板", Style::default().fg(Color::Gray)),
+            Span::styled("Ctrl+T 工具面板  ↑↓ 滚动", Style::default().fg(Color::Gray)),
         ]),
         Line::from(vec![
             Span::styled("/clear 清空 | /exit 退出", Style::default().fg(Color::Gray)),
@@ -112,7 +102,7 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(tips_paragraph, chunks[2]);
 
     let footer_text = vec![Line::from(vec![Span::styled(
-        "Ctrl+C 退出 | M 切换布局 | /clear 清空",
+        "Ctrl+C 退出 | Ctrl+T 工具面板 | /clear 清空",
         Style::default().fg(Color::DarkGray),
     )])];
 
@@ -121,49 +111,47 @@ fn render_welcome(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let status_style = match app.state {
-        crate::tui::AppState::Normal => Style::default().fg(Color::Green),
-        crate::tui::AppState::Processing => Style::default().fg(Color::Yellow),
-        crate::tui::AppState::Error(_) => Style::default().fg(Color::Red),
-    };
-
-    let status_text = match app.state {
-        crate::tui::AppState::Normal => "● 就绪",
-        crate::tui::AppState::Processing => "⟳ 处理中",
-        crate::tui::AppState::Error(ref e) => e,
-    };
-
-    let layout_mode_text = format!("{:?}", app.layout_mode);
-
-    let status_line = vec![
-        Span::styled(
-            "Oxide",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
+    // 左侧内容
+    let left_spans = vec![
+        Span::styled("Oxide", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
         Span::raw(" "),
-        Span::styled(
-            format!("v{}", env!("CARGO_PKG_VERSION")),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("v{}", env!("CARGO_PKG_VERSION")), Style::default().fg(Color::DarkGray)),
         Span::raw(" · "),
-        Span::styled(app.model.clone(), Style::default().fg(Color::Blue)),
-        Span::raw(" · "),
-        Span::styled(layout_mode_text, Style::default().fg(Color::Magenta)),
-        Span::raw(" · "),
-        Span::styled(status_text, status_style),
+        Span::styled(&app.model, Style::default().fg(Color::Cyan)),
     ];
 
-    let paragraph = Paragraph::new(Line::from(status_line))
-        .alignment(Alignment::Center);
+    // 右侧状态
+    let (status_icon, status_color) = match app.state {
+        crate::tui::AppState::Normal => ("● 就绪", Color::Green),
+        crate::tui::AppState::Processing => ("⟳ 处理中", Color::Yellow),
+        crate::tui::AppState::Error(_) => ("✗ 错误", Color::Red),
+    };
 
-    frame.render_widget(paragraph, area);
+    let right_spans = vec![
+        Span::styled(status_icon, Style::default().fg(status_color)),
+    ];
+
+    // 使用水平布局分隔左右
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(12)])
+        .split(area);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(left_spans)),
+        chunks[0]
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(right_spans))
+            .alignment(Alignment::Right),
+        chunks[1]
+    );
 }
 
 fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
-    let show_borders = app.layout_mode.show_card_borders();
-    let spacing = app.layout_mode.message_spacing();
+    // 固定使用边框模式
+    let show_borders = true;
+    let spacing = 1;
 
     // 收集所有消息的行
     let mut all_lines = Vec::new();
@@ -348,25 +336,19 @@ fn render_input_box(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("> ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         Span::styled(
             &app.input,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            " [Enter]发送 [M]布局",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::White),
         ),
     ])];
 
-    let paragraph = Paragraph::new(input_text).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(input_text)
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
 }
 
 fn render_help_bar(frame: &mut Frame, _app: &App, area: Rect) {
     let hints = vec![
-        ("[M]", "布局"),
-        ("[Ctrl+T]", "工具"),
+        ("[Ctrl+T]", "工具面板"),
         ("[↑↓]", "滚动"),
         ("[Ctrl+C]", "退出"),
     ];
