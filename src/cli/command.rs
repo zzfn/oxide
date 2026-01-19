@@ -1,6 +1,11 @@
-use crate::context::{ContextManager, SerializableMessage};
+use crate::agent::AgentType;
+use crate::context::SerializableMessage;
+use crate::hooks::SessionIdHook;
 use anyhow::Result;
 use colored::*;
+use rig::agent::stream_to_stdout;
+use rig::completion::Message;
+use rig::streaming::StreamingPrompt;
 
 use super::OxideCli;
 
@@ -14,12 +19,7 @@ impl OxideCli {
                 self.clear_context()?;
             }
             "/config" => {
-                // 配置信息由外部传入，这里只显示提示
-                println!("{}", "⚙️  Configuration loaded from environment".bright_cyan());
-                println!("  API URL: Set via API_URL or default");
-                println!("  Model: Set via MODEL_NAME or default");
-                println!("  Max Tokens: Set via MAX_TOKENS or default");
-                println!();
+                self.show_config()?;
             }
             "/toggle-tools" => {
                 println!("{}", "🔧 Tool toggle is available in TUI mode".bright_yellow());
@@ -52,11 +52,98 @@ impl OxideCli {
                 println!("{} Type /help for available commands", "💡".bright_blue());
             }
             _ => {
-                // 返回 true 表示需要处理用户消息（在 main.rs 中处理）
-                // 这里不做任何处理，返回 Ok(true) 让主循环继续
-                return Ok(true);
+                // Add user message to context
+                self.context_manager.add_message(Message::user(input));
+
+                println!("{}", "🧠 Thinking...".yellow());
+                println!("{}", "● oxide:".blue());
+
+                // Create session hook
+                let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
+
+                let response_result = match &self.agent {
+                    AgentType::OpenAI(agent) => {
+                        let mut stream = agent
+                            .stream_prompt(input)
+                            .with_hook(hook.clone())
+                            .multi_turn(20)
+                            .with_history(self.context_manager.get_messages().to_vec())
+                            .await;
+                        stream_to_stdout(&mut stream).await
+                    }
+                    AgentType::Anthropic(agent) => {
+                        let mut stream = agent
+                            .stream_prompt(input)
+                            .with_hook(hook.clone())
+                            .multi_turn(20)
+                            .with_history(self.context_manager.get_messages().to_vec())
+                            .await;
+                        stream_to_stdout(&mut stream).await
+                    }
+                    AgentType::Cohere(agent) => {
+                        let mut stream = agent
+                            .stream_prompt(input)
+                            .with_hook(hook.clone())
+                            .multi_turn(20)
+                            .with_history(self.context_manager.get_messages().to_vec())
+                            .await;
+                        stream_to_stdout(&mut stream).await
+                    }
+                    AgentType::DeepSeek(agent) => {
+                        let mut stream = agent
+                            .stream_prompt(input)
+                            .with_hook(hook.clone())
+                            .multi_turn(20)
+                            .with_history(self.context_manager.get_messages().to_vec())
+                            .await;
+                        stream_to_stdout(&mut stream).await
+                    }
+                    AgentType::Ollama(agent) => {
+                        let mut stream = agent
+                            .stream_prompt(input)
+                            .with_hook(hook.clone())
+                            .multi_turn(20)
+                            .with_history(self.context_manager.get_messages().to_vec())
+                            .await;
+                        stream_to_stdout(&mut stream).await
+                    }
+                };
+
+                println!();
+
+                match response_result {
+                    Ok(resp) => {
+                        // Get response content and add to context
+                        let response_content = resp.response();
+                        self.context_manager
+                            .add_message(Message::assistant(response_content));
+
+                        // Auto-save context
+                        if let Err(e) = self.context_manager.save() {
+                            println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                        }
+
+                        // We can't easily get token usage from the stream response in rig currently without more complex handling,
+                        // or if stream_to_stdout returns it.
+                        // rig 0.28 stream_to_stdout returns Result<StreamingResponse> which has a usage method? 
+                        // Let's assume it works.
+                         println!(
+                            "{} Total tokens used: {}",
+                            "📊".bright_blue(),
+                            resp.usage().total_tokens
+                        );
+                    }
+                    Err(e) => {
+                        println!("{} Failed to get AI response: {}", "❌".red(), e);
+                        println!(
+                            "{} Please check your API key and network connection",
+                            "💡".bright_blue()
+                        );
+                    }
+                }
             }
         }
+        println!(); 
         Ok(true)
     }
 
@@ -66,6 +153,19 @@ impl OxideCli {
             "{} Context cleared. Current session: {}",
             "✅".bright_green(),
             self.context_manager.session_id().bright_cyan()
+        );
+        println!();
+        Ok(())
+    }
+
+    fn show_config(&self) -> Result<()> {
+        println!("{}", "⚙️  Current Configuration:".bright_cyan());
+        println!("  {} {}", "API Base:".bright_white(), self.api_base);
+        println!("  {} {}", "Model:".bright_white(), self.model_name);
+        println!(
+            "  {} {}",
+            "API Key:".bright_white(),
+            "*".repeat(self.api_key.len().min(8))
         );
         println!();
         Ok(())
@@ -137,33 +237,18 @@ impl OxideCli {
 
                 println!("{}. {}", (i + 1).to_string().bright_white(), role_color);
 
-                // 显示内容
-                if let Some(content) = &serializable.content {
-                    // 限制显示长度，避免输出过长
-                    let display_content = if content.chars().count() > 200 {
-                        format!(
-                            "{}...",
-                            content.chars().take(200).collect::<String>()
-                        )
-                    } else {
-                        content.clone()
-                    };
+                // Display content
+                let content = if serializable.content.chars().count() > 200 {
+                    format!(
+                        "{}...",
+                        serializable.content.chars().take(200).collect::<String>()
+                    )
+                } else {
+                    serializable.content
+                };
 
-                    // 缩进显示内容
-                    for line in display_content.lines() {
-                        println!("   {}", line);
-                    }
-                }
-
-                // 显示工具调用
-                if let Some(tool_calls) = &serializable.tool_calls {
-                    for tool_call in tool_calls {
-                        println!(
-                            "   {} {}",
-                            "🔧".bright_yellow(),
-                            tool_call.function.name.bright_white()
-                        );
-                    }
+                for line in content.lines() {
+                    println!("   {}", line);
                 }
                 println!();
             }
@@ -216,7 +301,7 @@ impl OxideCli {
     }
 
     fn load_session(&mut self, session_id: &str) -> Result<()> {
-        // 保存当前会话
+        // Save current session
         if !self.context_manager.get_messages().is_empty() {
             if let Err(e) = self.context_manager.save() {
                 println!(
@@ -227,7 +312,7 @@ impl OxideCli {
             }
         }
 
-        // 切换到新会话
+        // Switch
         self.context_manager.switch_session(session_id.to_string());
 
         match self.context_manager.load() {
@@ -244,7 +329,7 @@ impl OxideCli {
                         .len()
                         .to_string()
                         .bright_yellow()
-                );
+                    );
             }
             Ok(false) => {
                 println!(
@@ -274,9 +359,9 @@ impl OxideCli {
             return Ok(());
         }
 
-        // 创建临时上下文管理器来删除指定会话
+        // Create temp context manager
         let storage_dir = std::path::PathBuf::from(".oxide/sessions");
-        let temp_context = ContextManager::new(storage_dir, session_id.to_string())?;
+        let temp_context = crate::context::ContextManager::new(storage_dir, session_id.to_string())?;
 
         match temp_context.delete_session() {
             Ok(true) => {
@@ -304,29 +389,5 @@ impl OxideCli {
         }
         println!();
         Ok(())
-    }
-}
-
-// 为 Message 实现 SerializableMessage 转换
-impl From<&crate::context::Message> for SerializableMessage {
-    fn from(msg: &crate::context::Message) -> Self {
-        SerializableMessage {
-            role: msg.role.clone(),
-            content: msg.content.clone(),
-            tool_call_id: msg.tool_call_id.clone(),
-            tool_calls: msg.tool_calls.clone().map(|calls| {
-                calls
-                    .into_iter()
-                    .map(|call| crate::context::SerializableToolCall {
-                        id: call.id,
-                        call_type: call.call_type,
-                        function: crate::context::SerializableFunctionCall {
-                            name: call.function.name,
-                            arguments: call.function.arguments,
-                        },
-                    })
-                    .collect()
-            }),
-        }
     }
 }

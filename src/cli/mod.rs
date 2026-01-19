@@ -151,13 +151,31 @@ pub const LOGO: &str = r#"
 (_______)|/     \|\_______/(______/ (_______/
 "#;
 
+use crate::agent::AgentType;
+
 pub struct OxideCli {
+    pub api_key: String,
+    pub api_base: String,
+    pub model_name: String,
+    pub agent: AgentType,
     pub context_manager: ContextManager,
 }
 
 impl OxideCli {
-    pub fn new(context_manager: ContextManager) -> Self {
-        Self { context_manager }
+    pub fn new(
+        api_key: String,
+        api_base: String,
+        model_name: String,
+        agent: AgentType,
+        context_manager: ContextManager,
+    ) -> Self {
+        Self {
+            api_key,
+            api_base,
+            model_name,
+            agent,
+            context_manager,
+        }
     }
 
     pub async fn run(&mut self) -> Result<()> {
