@@ -428,6 +428,11 @@ async fn run_cli_mode(mut agent: Agent) -> Result<()> {
     let context_manager = agent.context_manager.clone();
     let mut cli = cli::OxideCli::new(context_manager);
 
+    // 显示 LOGO 和欢迎横幅
+    println!("{}", cli::LOGO);
+    cli.show_welcome()?;
+    cli.show_tips()?;
+
     // 主循环
     use rustyline::error::ReadlineError;
     use rustyline::Editor;
