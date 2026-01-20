@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::env;
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
+#[allow(dead_code)]
 const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 const DEFAULT_STREAM_CHARS_PER_TICK: usize = 8;
@@ -11,7 +12,9 @@ pub struct Config {
     pub base_url: String,
     pub auth_token: String,
     pub model: Option<String>,
+    #[allow(dead_code)]
     pub max_tokens: u32,
+    #[allow(dead_code)]
     pub stream_chars_per_tick: usize,
 }
 

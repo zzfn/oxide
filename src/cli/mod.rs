@@ -19,6 +19,7 @@ use crate::context::ContextManager;
 // 命令信息结构
 #[derive(Clone, Debug)]
 struct CommandInfo {
+    #[allow(dead_code)]
     name: String,
     description: String,
 }
@@ -34,6 +35,7 @@ impl CommandInfo {
 
 // 自定义补全器
 pub struct OxideHelper {
+    #[allow(dead_code)]
     completer: FilenameCompleter,
     highlighter: MatchingBracketHighlighter,
     validator: MatchingBracketValidator,
@@ -330,6 +332,7 @@ impl OxideCli {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn session_id(&self) -> &str {
         self.context_manager.session_id()
     }

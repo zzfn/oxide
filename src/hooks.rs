@@ -5,6 +5,7 @@ use rig::completion::Message;
 /// Session-aware hook that logs tool calls and completions with session context
 #[derive(Clone)]
 pub struct SessionIdHook {
+    #[allow(dead_code)]
     pub session_id: String,
 }
 

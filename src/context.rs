@@ -99,6 +99,7 @@ impl ContextManager {
         })
     }
 
+    #[allow(dead_code)]
     pub fn with_max_messages(mut self, max_messages: usize) -> Self {
         self.max_messages = max_messages;
         self
@@ -115,6 +116,7 @@ impl ContextManager {
         &self.messages
     }
 
+    #[allow(dead_code)]
     pub fn get_messages_mut(&mut self) -> &mut Vec<Message> {
         &mut self.messages
     }
