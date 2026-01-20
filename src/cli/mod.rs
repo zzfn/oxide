@@ -152,6 +152,7 @@ pub const LOGO: &str = r#"
 "#;
 
 use crate::agent::AgentType;
+use crate::cli::render::Spinner;
 
 pub struct OxideCli {
     pub api_key: String,
@@ -159,6 +160,7 @@ pub struct OxideCli {
     pub model_name: String,
     pub agent: AgentType,
     pub context_manager: ContextManager,
+    spinner: Spinner,
 }
 
 impl OxideCli {
@@ -175,6 +177,7 @@ impl OxideCli {
             model_name,
             agent,
             context_manager,
+            spinner: Spinner::new(),
         }
     }
 

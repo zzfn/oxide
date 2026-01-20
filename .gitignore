@@ -21,3 +21,5 @@ Thumbs.db
 .agent/
 AGENTS.md
 CLAUDE.md
+# Session data
+.oxide/

@@ -3,10 +3,11 @@ use crate::context::SerializableMessage;
 use crate::hooks::SessionIdHook;
 use anyhow::Result;
 use colored::*;
-use rig::agent::stream_to_stdout;
 use rig::completion::Message;
 use rig::streaming::StreamingPrompt;
+use std::io::{stdout, Write};
 
+use super::render::stream_with_animation;
 use super::OxideCli;
 
 impl OxideCli {
@@ -55,13 +56,14 @@ impl OxideCli {
                 // Add user message to context
                 self.context_manager.add_message(Message::user(input));
 
-                println!("{}", "🧠 Thinking...".yellow());
-                println!("{}", "● oxide:".blue());
+                // Start spinner
+                self.spinner.start("Thinking...");
+                stdout().flush().unwrap();
 
                 // Create session hook
                 let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
 
-                let response_result = match &self.agent {
+                let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
                     AgentType::OpenAI(agent) => {
                         let mut stream = agent
                             .stream_prompt(input)
@@ -69,7 +71,9 @@ impl OxideCli {
                             .multi_turn(20)
                             .with_history(self.context_manager.get_messages().to_vec())
                             .await;
-                        stream_to_stdout(&mut stream).await
+                        // Stop spinner before response starts
+                        self.spinner.stop();
+                        stream_with_animation(&mut stream).await
                     }
                     AgentType::Anthropic(agent) => {
                         let mut stream = agent
@@ -78,7 +82,8 @@ impl OxideCli {
                             .multi_turn(20)
                             .with_history(self.context_manager.get_messages().to_vec())
                             .await;
-                        stream_to_stdout(&mut stream).await
+                        self.spinner.stop();
+                        stream_with_animation(&mut stream).await
                     }
                     AgentType::Cohere(agent) => {
                         let mut stream = agent
@@ -87,7 +92,8 @@ impl OxideCli {
                             .multi_turn(20)
                             .with_history(self.context_manager.get_messages().to_vec())
                             .await;
-                        stream_to_stdout(&mut stream).await
+                        self.spinner.stop();
+                        stream_with_animation(&mut stream).await
                     }
                     AgentType::DeepSeek(agent) => {
                         let mut stream = agent
@@ -96,7 +102,8 @@ impl OxideCli {
                             .multi_turn(20)
                             .with_history(self.context_manager.get_messages().to_vec())
                             .await;
-                        stream_to_stdout(&mut stream).await
+                        self.spinner.stop();
+                        stream_with_animation(&mut stream).await
                     }
                     AgentType::Ollama(agent) => {
                         let mut stream = agent
@@ -105,7 +112,8 @@ impl OxideCli {
                             .multi_turn(20)
                             .with_history(self.context_manager.get_messages().to_vec())
                             .await;
-                        stream_to_stdout(&mut stream).await
+                        self.spinner.stop();
+                        stream_with_animation(&mut stream).await
                     }
                 };
 
