@@ -2,11 +2,7 @@ use anyhow::Result;
 use rig::{
     agent::Agent,
     client::CompletionClient,
-    providers::{
-        anthropic, cohere,
-        deepseek::{self, DEEPSEEK_CHAT},
-        ollama, openai,
-    },
+    providers::{anthropic, openai::{self, responses_api}},
 };
 
 use crate::tools::{
@@ -35,37 +31,24 @@ macro_rules! build_agent {
     }};
 }
 
-#[derive(Debug, Clone)]
-pub enum Provider {
-    OpenAI,
-    Anthropic,
-    Cohere,
-    DeepSeek,
-    Ollama,
-}
-
-// Agent enum to handle different provider types
+// Agent enum - 支持多种客户端
 pub enum AgentType {
-    OpenAI(Agent<openai::responses_api::ResponsesCompletionModel>),
     Anthropic(Agent<anthropic::completion::CompletionModel>),
-    Cohere(Agent<cohere::CompletionModel>),
-    DeepSeek(Agent<deepseek::CompletionModel>),
-    Ollama(Agent<ollama::CompletionModel>),
+    OpenAI(Agent<responses_api::ResponsesCompletionModel>),
 }
 
 pub struct AgentBuilder {
-    provider: Provider,
-    api_key: String,
-    model_name: String,
+    base_url: String,
+    auth_token: String,
+    model: Option<String>,
 }
 
 impl AgentBuilder {
-    pub fn new(api_key: String, model_name: String) -> Result<Self> {
-        let provider = Self::get_provider_from_model(&model_name)?;
+    pub fn new(base_url: String, auth_token: String, model: Option<String>) -> Result<Self> {
         Ok(Self {
-            provider,
-            api_key,
-            model_name,
+            base_url,
+            auth_token,
+            model,
         })
     }
 
@@ -73,82 +56,35 @@ impl AgentBuilder {
         let tools = self.create_tools();
         let preamble = self.get_preamble();
 
-        match self.provider {
-            Provider::OpenAI => {
-                build_agent!(
-                    openai::Client::new(&self.api_key),
-                    &self.model_name,
-                    &preamble,
-                    tools,
-                    OpenAI
-                )
-            }
-            Provider::Anthropic => {
-                build_agent!(
-                    anthropic::Client::new(&self.api_key),
-                    &self.model_name,
-                    &preamble,
-                    tools,
-                    Anthropic
-                )
-            }
-            Provider::Cohere => {
-                build_agent!(
-                    cohere::Client::new(&self.api_key),
-                    &self.model_name,
-                    &preamble,
-                    tools,
-                    Cohere
-                )
-            }
-            Provider::DeepSeek => {
-                build_agent!(
-                    deepseek::Client::new(&self.api_key),
-                    DEEPSEEK_CHAT,
-                    &preamble,
-                    tools,
-                    DeepSeek
-                )
-            }
-            Provider::Ollama => {
-                build_agent!(
-                    ollama::Client::new(rig::client::Nothing),
-                    &self.model_name,
-                    &preamble,
-                    tools,
-                    Ollama
-                )
-            }
-        }
-    }
+        // 使用默认模型或配置的模型
+        let model_name = self.model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
 
-    fn get_provider_from_model(model_name: &str) -> Result<Provider> {
-        match model_name.to_lowercase().as_str() {
-            // OpenAI models
-            name if name.starts_with("gpt-") || name.starts_with("o1-") => Ok(Provider::OpenAI),
-
-            // Anthropic models
-            name if name.starts_with("claude-") => Ok(Provider::Anthropic),
-
-            // Cohere models
-            name if name.starts_with("command-") => Ok(Provider::Cohere),
-
-            // DeepSeek models
-            name if name.starts_with("deepseek-") => Ok(Provider::DeepSeek),
-
-            _ => {
-                // 默认根据常见模型名称判断
-                match model_name {
-                    "gpt-4o" | "gpt-4" | "gpt-3.5-turbo" | "o1-preview" | "o1-mini" => {
-                        Ok(Provider::OpenAI)
-                    }
-                    "ollama" | "local" => Ok(Provider::Ollama),
-                    _ => Err(anyhow::anyhow!(
-                        "Unknown model: {}. Please specify a supported model.",
-                        model_name
-                    )),
-                }
-            }
+        // 判断使用哪个客户端
+        // 优先检查 URL 路径是否包含 /anthropic，其次检查域名是否包含 anthropic.com
+        if self.base_url.contains("/anthropic") || self.base_url.contains("anthropic.com") {
+            // Anthropic API 或兼容端点
+            build_agent!(
+                anthropic::Client::builder()
+                    .api_key(&self.auth_token)
+                    .base_url(&self.base_url)
+                    .build(),
+                &model_name,
+                &preamble,
+                tools,
+                Anthropic
+            )
+        } else {
+            // OpenAI 兼容服务
+            build_agent!(
+                openai::Client::builder()
+                    .api_key(&self.auth_token)
+                    .base_url(&self.base_url)
+                    .build(),
+                &model_name,
+                &preamble,
+                tools,
+                OpenAI
+            )
         }
     }
 
@@ -186,6 +122,6 @@ struct AgentTools {
 }
 
 // Convenience function for creating an agent
-pub fn create_agent(api_key: String, model_name: String) -> Result<AgentType> {
-    AgentBuilder::new(api_key, model_name)?.build()
+pub fn create_agent(base_url: String, auth_token: String, model: Option<String>) -> Result<AgentType> {
+    AgentBuilder::new(base_url, auth_token, model)?.build()
 }

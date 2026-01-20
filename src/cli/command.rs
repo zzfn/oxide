@@ -85,36 +85,6 @@ impl OxideCli {
                         self.spinner.stop();
                         stream_with_animation(&mut stream).await
                     }
-                    AgentType::Cohere(agent) => {
-                        let mut stream = agent
-                            .stream_prompt(input)
-                            .with_hook(hook.clone())
-                            .multi_turn(20)
-                            .with_history(self.context_manager.get_messages().to_vec())
-                            .await;
-                        self.spinner.stop();
-                        stream_with_animation(&mut stream).await
-                    }
-                    AgentType::DeepSeek(agent) => {
-                        let mut stream = agent
-                            .stream_prompt(input)
-                            .with_hook(hook.clone())
-                            .multi_turn(20)
-                            .with_history(self.context_manager.get_messages().to_vec())
-                            .await;
-                        self.spinner.stop();
-                        stream_with_animation(&mut stream).await
-                    }
-                    AgentType::Ollama(agent) => {
-                        let mut stream = agent
-                            .stream_prompt(input)
-                            .with_hook(hook.clone())
-                            .multi_turn(20)
-                            .with_history(self.context_manager.get_messages().to_vec())
-                            .await;
-                        self.spinner.stop();
-                        stream_with_animation(&mut stream).await
-                    }
                 };
 
                 println!();
@@ -168,11 +138,10 @@ impl OxideCli {
 
     fn show_config(&self) -> Result<()> {
         println!("{}", "⚙️  Current Configuration:".bright_cyan());
-        println!("  {} {}", "API Base:".bright_white(), self.api_base);
         println!("  {} {}", "Model:".bright_white(), self.model_name);
         println!(
             "  {} {}",
-            "API Key:".bright_white(),
+            "Auth Token:".bright_white(),
             "*".repeat(self.api_key.len().min(8))
         );
         println!();

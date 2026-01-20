@@ -25,14 +25,17 @@ async fn main() -> Result<()> {
 
     if let Err(e) = config.validate() {
         eprintln!("Error: {}", e);
-        eprintln!("Tip: Please set DEEPSEEK_API_KEY environment variable");
+        eprintln!("Tip: Please set OXIDE_AUTH_TOKEN environment variable");
         eprintln!("Tip: Or create .env file in project root");
         std::process::exit(1);
     }
 
     // Create Agent using rig-core
-    let agent = create_agent(config.api_key.clone(), config.model.clone())
-        .context("Failed to create agent")?;
+    let agent = create_agent(
+        config.base_url.clone(),
+        config.auth_token.clone(),
+        config.model.clone(),
+    ).context("Failed to create agent")?;
 
     #[cfg(feature = "cli")]
     {
@@ -48,9 +51,8 @@ async fn main() -> Result<()> {
 
         // Initialize and run CLI
         let mut cli = OxideCli::new(
-            config.api_key,
-            config.api_url, // Note: config might need to support api_base if distinct from full URL
-            config.model,
+            config.auth_token,
+            config.model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
             agent,
             context_manager
         );

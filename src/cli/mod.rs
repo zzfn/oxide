@@ -156,7 +156,6 @@ use crate::cli::render::Spinner;
 
 pub struct OxideCli {
     pub api_key: String,
-    pub api_base: String,
     pub model_name: String,
     pub agent: AgentType,
     pub context_manager: ContextManager,
@@ -166,14 +165,12 @@ pub struct OxideCli {
 impl OxideCli {
     pub fn new(
         api_key: String,
-        api_base: String,
         model_name: String,
         agent: AgentType,
         context_manager: ContextManager,
     ) -> Self {
         Self {
             api_key,
-            api_base,
             model_name,
             agent,
             context_manager,
