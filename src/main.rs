@@ -3,6 +3,7 @@ mod config;
 mod context;
 mod hooks;
 mod tools;
+mod task;
 
 #[cfg(feature = "cli")]
 mod cli;
@@ -13,7 +14,7 @@ mod cli;
 
 use anyhow::{Context, Result};
 use config::Config;
-use crate::agent::create_agent;
+use crate::agent::AgentBuilder;
 use crate::cli::OxideCli;
 use crate::context::ContextManager;
 use names::Generator;
@@ -30,12 +31,13 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    // Create Agent using rig-core
-    let agent = create_agent(
+    // Create Agent using AgentBuilder
+    let builder = AgentBuilder::new(
         config.base_url.clone(),
         config.auth_token.clone(),
         config.model.clone(),
-    ).context("Failed to create agent")?;
+    );
+    let agent = builder.build_main().context("Failed to create agent")?;
 
     #[cfg(feature = "cli")]
     {
