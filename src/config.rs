@@ -1,5 +1,18 @@
+//! 配置模块
+//!
+//! 支持多层次的配置系统：
+//! 1. 全局配置：~/.oxide/config.toml
+//! 2. 项目配置：.oxide/config.toml
+//! 3. 项目指令：.oxide/CONFIG.md
+//! 4. 环境变量（覆盖所有配置）
+//!
+//! 为了向后兼容，仍支持从环境变量直接加载
+
 use anyhow::{Context, Result};
 use std::env;
+
+mod loader;
+pub use loader::ConfigLoader;
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 #[allow(dead_code)]
@@ -19,7 +32,32 @@ pub struct Config {
 }
 
 impl Config {
+    /// 使用新的配置加载器（推荐）
+    pub fn load_with_loader() -> Result<Self> {
+        let loader = ConfigLoader::new();
+        let loaded = loader.load()?;
+
+        Ok(Self {
+            base_url: loaded.base_url,
+            auth_token: loaded.auth_token,
+            model: loaded.model,
+            max_tokens: loaded.max_tokens,
+            stream_chars_per_tick: loaded.stream_chars_per_tick,
+        })
+    }
+
+    /// 从环境变量直接加载（向后兼容）
     pub fn load() -> Result<Self> {
+        // 优先尝试使用新的配置加载器
+        // 如果失败，回退到环境变量
+        match Self::load_with_loader() {
+            Ok(config) => Ok(config),
+            Err(_) => Self::load_from_env(),
+        }
+    }
+
+    /// 从环境变量加载配置
+    fn load_from_env() -> Result<Self> {
         dotenv::dotenv().ok();
 
         let base_url = env::var("OXIDE_BASE_URL")
@@ -118,6 +156,12 @@ mod tests {
 
     #[test]
     fn test_load_stream_chars_per_tick() {
+        // 清理可能存在的环境变量
+        env::remove_var("ANTHROPIC_API_KEY");
+        env::remove_var("API_KEY");
+        env::remove_var("MODEL");
+        env::remove_var("MODEL_NAME");
+
         env::set_var("OXIDE_AUTH_TOKEN", "test-token");
         env::set_var("STREAM_CHARS_PER_TICK", "12");
         let result = Config::load();

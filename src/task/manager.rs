@@ -71,6 +71,7 @@ pub struct Task {
 
 impl Task {
     /// 创建新任务
+    #[allow(dead_code)]
     pub fn new(name: String, description: String, prompt: String, agent_type: AgentType) -> Self {
         let id = Uuid::new_v4().to_string();
         Self {
@@ -89,12 +90,14 @@ impl Task {
     }
 
     /// 标记任务为进行中
+    #[allow(dead_code)]
     pub fn mark_in_progress(&mut self) {
         self.status = TaskStatus::InProgress;
         self.started_at = Some(Utc::now());
     }
 
     /// 标记任务为已完成
+    #[allow(dead_code)]
     pub fn mark_completed(&mut self, output_file: Option<PathBuf>) {
         self.status = TaskStatus::Completed;
         self.completed_at = Some(Utc::now());
@@ -102,6 +105,7 @@ impl Task {
     }
 
     /// 标记任务为失败
+    #[allow(dead_code)]
     pub fn mark_failed(&mut self, error: String) {
         self.status = TaskStatus::Failed;
         self.completed_at = Some(Utc::now());
@@ -179,6 +183,7 @@ impl TaskManager {
     }
 
     /// 创建新任务
+    #[allow(dead_code)]
     pub fn create_task(
         &self,
         name: String,
@@ -290,6 +295,7 @@ impl TaskManager {
     }
 
     /// 清理已完成的任务
+    #[allow(dead_code)]
     pub fn cleanup_completed_tasks(&self, older_than: chrono::Duration) -> Result<usize> {
         let tasks = self.list_tasks()?;
         let cutoff_time = Utc::now() - older_than;

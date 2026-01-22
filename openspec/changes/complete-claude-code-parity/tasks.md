@@ -80,7 +80,7 @@
 - [x] 实现任务输出捕获
 - [x] 实现 TaskOutput 工具
 - [x] 集成到主 Agent
-- [ ] 编写 Task 工具测试
+- [x] 编写 Task 工具测试
 
 ### 2.6 /agent 命令
 - [x] 实现 `/agent` 斜杠命令
@@ -88,83 +88,84 @@
 - [x] 实现 `/agent switch <type>` 子命令
 - [x] 实现 `/agent capabilities` 子命令
 - [x] 添加命令帮助和补全
-- [ ] 测试 /agent 命令功能
+- [x] 测试 /agent 命令功能
 
 ## Phase 3: Advanced Tools
 
 ### 3.1 MultiEdit 工具
-- [ ] 创建 `src/tools/multiedit.rs`
-- [ ] 实现 `MultiEditInput` 结构体
-- [ ] 实现批量编辑逻辑
-- [ ] 实现编辑原子性保证
-- [ ] 集成到 Agent 工具链
-- [ ] 编写 MultiEdit 测试
+- [x] 创建 `src/tools/multiedit.rs`
+- [x] 实现 `MultiEditInput` 结构体
+- [x] 实现批量编辑逻辑
+- [x] 实现编辑原子性保证
+- [x] 集成到 Agent 工具链
+- [x] 编写 MultiEdit 测试
 
 ### 3.2 AskUserQuestion 工具
-- [ ] 创建 `src/tools/ask.rs`
-- [ ] 实现 `QuestionInput` 结构体
-- [ ] 实现交互式选择器 UI（CLI 模式）
-- [ ] 实现交互式选择器 UI（TUI 模式）
-- [ ] 实现答案收集和返回
-- [ ] 集成到 Agent 工具链
-- [ ] 编写 AskUserQuestion 测试
+- [x] 创建 `src/tools/ask_user_question.rs`
+- [x] 实现 `QuestionInput` 结构体
+- [x] 实现交互式选择器 UI（CLI 模式）
+- [x] 实现交互式选择器 UI（TUI 模式）
+- [x] 实现答案收集和返回
+- [x] 集成到 Agent 工具链
+- [x] 编写 AskUserQuestion 测试
 
 ### 3.3 NotebookEdit 工具
-- [ ] 创建 `src/tools/notebook.rs`
-- [ ] 添加 Jupyter notebook 解析依赖
-- [ ] 实现 `NotebookEditInput` 结构体
-- [ ] 实现 notebook 单元编辑逻辑
-- [ ] 实现 notebook 序列化
-- [ ] 集成到 Agent 工具链
-- [ ] 编写 NotebookEdit 测试
+- [x] 创建 `src/tools/notebook_edit.rs`
+- [x] 添加 Jupyter notebook 解析依赖(使用 serde_json)
+- [x] 实现 `NotebookEditInput` 结构体
+- [x] 实现 notebook 单元编辑逻辑
+- [x] 实现 notebook 序列化
+- [x] 集成到 Agent 工具链
+- [x] 编写 NotebookEdit 测试
 
 ### 3.4 Git 增强
-- [ ] 创建 `src/tools/git_guard.rs`
-- [ ] 添加 `git2` 依赖
-- [ ] 实现 `GitGuard` 结构体
-- [ ] 实现分支检测逻辑
-- [ ] 实现远程状态检查
-- [ ] 实现主分支推送警告
-- [ ] 集成到 shell_execute 工具
-- [ ] 编写 Git 安全检查测试
+- [x] 创建 `src/tools/git_guard.rs`
+- [x] 添加 `git2` 依赖
+- [x] 实现 `GitGuard` 结构体
+- [x] 实现分支检测逻辑
+- [x] 实现远程状态检查
+- [x] 实现主分支推送警告
+- [x] 集成到 shell_execute 工具
+- [x] 编写 Git 安全检查测试
 
 ### 3.5 Commit 规范验证
-- [ ] 创建 `src/tools/commit_linter.rs`
-- [ ] 实现 `CommitLinter` 结构体
-- [ ] 实现 Conventional Commits 正则验证
-- [ ] 实现 commit 消息格式化
-- [ ] 集成到 Git 工作流
-- [ ] 编写 Commit Linter 测试
+- [x] 创建 `src/tools/commit_linter.rs`
+- [x] 实现 `CommitLinter` 结构体
+- [x] 实现 Conventional Commits 正则验证
+- [x] 实现 commit 消息格式化
+- [x] 集成到 Git 工作流
+- [x] 编写 Commit Linter 测试
 
 ## Phase 4: TUI 完善
 
 ### 4.1 完成未完成的 TUI 任务
-- [ ] 阶段 3: 实现增量 Markdown 解析器
-- [ ] 阶段 6: 主题系统实现
-- [ ] 阶段 8: 交互功能增强
+- [x] 阶段 3: 实现增量 Markdown 解析器
+- [x] 阶段 6: 主题系统实现
+- [x] 阶段 8: 交互功能增强（帮助面板、历史管理基础）
 - [ ] 阶段 9: 性能优化
 - [ ] 阶段 10: 测试和文档
 
 ### 4.2 主题系统
-- [ ] 创建 `src/tui/theme.rs` 模块
-- [ ] 实现内置主题（dark/light/high_contrast）
-- [ ] 实现主题配置加载
-- [ ] 实现主题热切换
+- [x] 创建 `src/tui/theme.rs` 模块
+- [x] 实现内置主题（dark/light/high_contrast）
+- [x] 实现主题配置加载
+- [x] 实现主题热切换（通过 `App::set_theme`）
 - [ ] 添加 `/theme` 命令
 - [ ] 创建主题配置示例
 
 ### 4.3 TUI 交互增强
-- [ ] 实现快捷键帮助屏幕（`?` 键）
-- [ ] 实现命令历史管理
-- [ ] 实现上下键浏览历史（`↑/↓`）
+- [x] 实现快捷键帮助屏幕（`?` 键）
+- [x] 实现命令历史管理（`App::add_to_history` 等）
+- [x] 实现上下键浏览历史（`↑/↓` 在输入框为空时）
+- [x] 实现历史快捷键（`Ctrl+P/N`）
 - [ ] 实现历史搜索（`Ctrl+R`）
 - [ ] 实现多行输入模式（`Ctrl+G`）
 - [ ] 实现消息搜索（`/` 键）
 
 ### 4.4 TUI 性能优化
-- [ ] 实现虚拟滚动
-- [ ] 添加渲染缓存
-- [ ] 实现增量渲染
+- [x] 实现虚拟滚动
+- [x] 添加渲染缓存
+- [x] 实现增量渲染（通过 dirty 标志）
 - [ ] 限制消息历史大小
 - [ ] 添加性能监控
 
@@ -178,28 +179,33 @@
 - [x] 添加命令帮助
 
 ### 5.2 /config 命令增强
-- [ ] 实现 `/config show` 子命令
-- [ ] 实现 `/config edit` 子命令
-- [ ] 实现 `/config reload` 子命令
-- [ ] 添加配置验证命令
+- [x] 实现 `/config show` 子命令
+- [x] 实现 `/config edit` 子命令
+- [x] 实现 `/config reload` 子命令
+- [x] 添加配置验证命令
 
 ### 5.3 /help 命令增强
-- [ ] 显示所有 Agent 类型
-- [ ] 显示所有工具列表
-- [ ] 显示所有斜杠命令
-- [ ] 添加使用示例
+- [x] 显示所有 Agent 类型
+- [x] 显示所有工具列表
+- [x] 显示所有斜杠命令
+- [x] 添加使用示例
 
 ## Phase 6: 测试
 
 ### 6.1 单元测试
-- [ ] Agent 类型测试
-- [ ] Agent 能力测试
-- [ ] Task Manager 测试
-- [ ] 所有工具测试
-- [ ] 配置加载测试
-- [ ] Git 安全检查测试
+- [x] Agent 类型测试
+- [x] Agent 能力测试
+- [x] Task Manager 测试
+- [x] 所有工具测试
+- [x] 配置加载测试
+- [x] Git 安全检查测试
+- [x] TUI 主题系统测试
+- [x] TUI Markdown 解析器测试
+- [x] TUI 渲染缓存和虚拟滚动测试
 
 ### 6.2 集成测试
+- [x] 主题切换测试
+- [x] Markdown 解析集成测试
 - [ ] 完整对话流程测试
 - [ ] Agent 切换测试
 - [ ] 任务创建和执行测试

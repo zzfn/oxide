@@ -82,43 +82,66 @@ impl Drop for EventHandler {
 
 pub fn handle_key_event(key: KeyEvent, tui_sender: &UnboundedSender<TuiEvent>) -> Result<bool> {
     match key.code {
+        // Ctrl+C: 退出
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             tui_sender.send(TuiEvent::Exit)?;
             return Ok(true);
         }
+        // Enter: 发送消息
         KeyCode::Enter => {
             tui_sender.send(TuiEvent::SendMessage)?;
         }
+        // ?: 显示帮助
+        KeyCode::Char('?') => {
+            tui_sender.send(TuiEvent::Command("/help".to_string()))?;
+        }
+        // /: 命令模式
         KeyCode::Char('/') => {
             tui_sender.send(TuiEvent::Command("/".to_string()))?;
         }
+        // Ctrl+T: 切换工具面板
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            tui_sender.send(TuiEvent::Command("/toggle-tools".to_string()))?;
+        }
+        // Ctrl+P: 上一条历史记录
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            tui_sender.send(TuiEvent::NavigateHistoryPrev)?;
+        }
+        // Ctrl+N: 下一条历史记录
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            tui_sender.send(TuiEvent::NavigateHistoryNext)?;
+        }
+        // 上箭头: 上一条历史记录（当输入框为空时）
         KeyCode::Up => {
             tui_sender.send(TuiEvent::NavigateUp)?;
         }
+        // 下箭头: 下一条历史记录（当输入框为空时）
         KeyCode::Down => {
             tui_sender.send(TuiEvent::NavigateDown)?;
         }
+        // PageUp/PageDown: 滚动消息
         KeyCode::PageUp => {
             tui_sender.send(TuiEvent::PageUp)?;
         }
         KeyCode::PageDown => {
             tui_sender.send(TuiEvent::PageDown)?;
         }
+        // Home: 滚动到顶部
         KeyCode::Home => {
             tui_sender.send(TuiEvent::ScrollToTop)?;
         }
+        // End: 滚动到底部
         KeyCode::End => {
             tui_sender.send(TuiEvent::ScrollToBottom)?;
         }
-        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            tui_sender.send(TuiEvent::Command("/toggle-tools".to_string()))?;
-        }
+        // Backspace/Delete: 删除字符
         KeyCode::Backspace => {
             tui_sender.send(TuiEvent::Backspace)?;
         }
         KeyCode::Delete => {
             tui_sender.send(TuiEvent::Backspace)?;
         }
+        // 其他字符: 输入
         KeyCode::Char(c) => {
             tui_sender.send(TuiEvent::Input(c.to_string()))?;
         }

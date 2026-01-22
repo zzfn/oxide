@@ -1,3 +1,4 @@
+use crate::tui::theme::Theme;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,6 +39,8 @@ pub enum TuiEvent {
     Command(String),
     NavigateUp,
     NavigateDown,
+    NavigateHistoryPrev,
+    NavigateHistoryNext,
     PageUp,
     PageDown,
     ScrollToTop,
@@ -62,8 +65,12 @@ pub struct App {
     pub session_id: String,
     pub stream_chars_per_tick: usize,
     pub tick_count: u64,
+    pub theme: Theme,
+    pub show_help: bool,
     dirty: bool,
     streaming_message: Option<StreamingMessage>,
+    input_history: Vec<String>,
+    history_index: usize,
 }
 
 impl App {
@@ -95,9 +102,69 @@ impl App {
             session_id,
             stream_chars_per_tick,
             tick_count: 0,
+            theme: Theme::default(),
+            show_help: false,
             dirty: true,
             streaming_message: None,
+            input_history: Vec::new(),
+            history_index: 0,
         }
+    }
+
+    /// 设置主题
+    pub fn set_theme(&mut self, theme: Theme) {
+        if self.theme.name != theme.name {
+            self.theme = theme;
+            self.mark_dirty();
+        }
+    }
+
+    /// 切换帮助面板
+    pub fn toggle_help(&mut self) {
+        self.show_help = !self.show_help;
+        self.mark_dirty();
+    }
+
+    /// 添加输入到历史记录
+    pub fn add_to_history(&mut self, input: String) {
+        if !input.trim().is_empty() {
+            self.input_history.push(input);
+            self.history_index = self.input_history.len();
+        }
+    }
+
+    /// 上一条历史记录
+    pub fn history_prev(&mut self) {
+        if !self.input_history.is_empty() && self.history_index > 0 {
+            self.history_index -= 1;
+            if let Some(item) = self.input_history.get(self.history_index) {
+                self.input = item.clone();
+                self.mark_dirty();
+            }
+        }
+    }
+
+    /// 下一条历史记录
+    pub fn history_next(&mut self) {
+        if self.history_index < self.input_history.len().saturating_sub(1) {
+            self.history_index += 1;
+            if let Some(item) = self.input_history.get(self.history_index) {
+                self.input = item.clone();
+                self.mark_dirty();
+            }
+        } else if self.history_index < self.input_history.len() {
+            // 回到空输入
+            self.history_index = self.input_history.len();
+            self.input.clear();
+            self.mark_dirty();
+        }
+    }
+
+    /// 清空历史记录
+    pub fn clear_history(&mut self) {
+        self.input_history.clear();
+        self.history_index = 0;
+        self.mark_dirty();
     }
 
     pub fn set_event_sender(&mut self, sender: UnboundedSender<TuiEvent>) {

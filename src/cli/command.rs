@@ -19,8 +19,21 @@ impl OxideCli {
             "/clear" => {
                 self.clear_context()?;
             }
-            "/config" => {
+            "/config" | "/config show" => {
                 self.show_config()?;
+            }
+            "/config edit" => {
+                self.edit_config()?;
+            }
+            "/config reload" => {
+                self.reload_config()?;
+            }
+            "/config validate" => {
+                self.validate_config()?;
+            }
+            _ if input.starts_with("/config ") => {
+                println!("{} Unknown /config subcommand", "❌".red());
+                println!("{} Usage: /config [show|edit|reload|validate]", "💡".bright_blue());
             }
             "/toggle-tools" => {
                 println!("{}", "🔧 Tool toggle is available in TUI mode".bright_yellow());
@@ -177,14 +190,198 @@ impl OxideCli {
         Ok(())
     }
 
+    fn edit_config(&self) -> Result<()> {
+        // 查找配置文件
+        let config_paths = vec![
+            std::path::PathBuf::from(".oxide/config.toml"),
+            dirs::home_dir()
+                .map(|p| p.join(".oxide/config.toml"))
+                .unwrap_or_else(|| std::path::PathBuf::from("~/.oxide/config.toml")),
+        ];
+
+        let config_file = config_paths
+            .iter()
+            .find(|p| p.exists())
+            .or_else(|| config_paths.first())
+            .unwrap();
+
+        println!(
+            "{} Opening config file: {}",
+            "📝".bright_blue(),
+            config_file.display().to_string().bright_cyan()
+        );
+        println!(
+            "{}",
+            "💡 Tip: Use /config reload after editing to apply changes".bright_yellow()
+        );
+        println!();
+
+        // 使用系统默认编辑器打开配置文件
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
+            if cfg!(target_os = "macos") {
+                "nano".to_string()
+            } else if cfg!(target_os = "windows") {
+                "notepad".to_string()
+            } else {
+                "nano".to_string()
+            }
+        });
+
+        let status = std::process::Command::new(&editor)
+            .arg(config_file)
+            .status();
+
+        match status {
+            Ok(s) if s.success() => {
+                println!(
+                    "{} Config file edited successfully",
+                    "✅".bright_green()
+                );
+                println!(
+                    "{} Use '/config reload' to apply changes",
+                    "💡".bright_blue()
+                );
+            }
+            Ok(_) => {
+                println!(
+                    "{} Editor exited with non-zero status",
+                    "⚠️".yellow()
+                );
+            }
+            Err(e) => {
+                println!(
+                    "{} Failed to open editor: {}",
+                    "❌".red(),
+                    e
+                );
+                println!(
+                    "{} You can manually edit: {}",
+                    "💡".bright_blue(),
+                    config_file.display().to_string().bright_cyan()
+                );
+            }
+        }
+        println!();
+        Ok(())
+    }
+
+    fn reload_config(&mut self) -> Result<()> {
+        println!("{}", "🔄 Reloading configuration...".bright_yellow());
+        println!();
+
+        // TODO: 实现配置重载逻辑
+        // 这需要：
+        // 1. 重新读取配置文件
+        // 2. 更新 self.model_name, self.api_key 等字段
+        // 3. 可能需要重建 Agent
+
+        println!(
+            "{} Configuration reload is not fully implemented yet.",
+            "⚠️".yellow()
+        );
+        println!(
+            "{} For now, restart the application to apply config changes.",
+            "💡".bright_blue()
+        );
+        println!();
+        Ok(())
+    }
+
+    fn validate_config(&self) -> Result<()> {
+        println!("{}", "✓ Validating configuration...".bright_cyan());
+        println!();
+
+        let mut has_errors = false;
+        let mut has_warnings = false;
+
+        // 验证 API Key
+        if self.api_key.is_empty() {
+            println!(
+                "{} {}",
+                "❌".bright_red(),
+                "API Key is empty".bright_red()
+            );
+            has_errors = true;
+        } else if self.api_key.len() < 10 {
+            println!(
+                "{} {}",
+                "⚠️".bright_yellow(),
+                "API Key seems too short".bright_yellow()
+            );
+            has_warnings = true;
+        } else {
+            println!(
+                "{} {}",
+                "✓".bright_green(),
+                "API Key looks valid".bright_green()
+            );
+        }
+
+        // 验证模型名称
+        if self.model_name.is_empty() {
+            println!(
+                "{} {}",
+                "❌".bright_red(),
+                "Model name is empty".bright_red()
+            );
+            has_errors = true;
+        } else {
+            println!(
+                "{} {}",
+                "✓".bright_green(),
+                format!("Model: {}", self.model_name).bright_green()
+            );
+        }
+
+        // 检查配置文件是否存在
+        let config_paths = vec![
+            std::path::PathBuf::from(".oxide/config.toml"),
+            dirs::home_dir()
+                .map(|p| p.join(".oxide/config.toml"))
+                .unwrap_or_else(|| std::path::PathBuf::from("~/.oxide/config.toml")),
+        ];
+
+        let has_config = config_paths.iter().any(|p| p.exists());
+        if has_config {
+            println!(
+                "{} {}",
+                "✓".bright_green(),
+                "Config file exists".bright_green()
+            );
+        } else {
+            println!(
+                "{} {}",
+                "⚠️".bright_yellow(),
+                "No config file found (using defaults)".bright_yellow()
+            );
+            has_warnings = true;
+        }
+
+        println!();
+
+        if has_errors {
+            println!("{}", "❌ Configuration validation FAILED".bright_red());
+        } else if has_warnings {
+            println!("{}", "⚠️ Configuration validation completed with warnings".bright_yellow());
+        } else {
+            println!("{}", "✓ Configuration validation PASSED".bright_green());
+        }
+        println!();
+        Ok(())
+    }
+
     fn show_help(&self) -> Result<()> {
-        println!("{}", "📚 Available Commands:".bright_cyan());
+        println!("{}", "📚 Oxide CLI - Help & Commands".bright_cyan().bold());
+        println!();
+
+        // 斜杠命令列表
+        println!("{}", "═══ Slash Commands ═══".bright_black());
         println!();
         println!("  {} - Exit the application", "/quit or /exit".bright_green());
         println!("  {} - Clear all messages in current session", "/clear".bright_green());
         println!(
-            "  {} - Show current model configuration",
-            "/config".bright_green()
+            "  {} - Show or edit configuration",
+            "/config [show|edit|reload|validate]".bright_green()
         );
         println!(
             "  {} - Show conversation history",
@@ -203,15 +400,93 @@ impl OxideCli {
         println!("  {} - Manage background tasks", "/tasks [list|show <id>|cancel <id>]".bright_green());
         println!("  {} - Show this help message", "/help".bright_green());
         println!();
+
+        // Agent 类型列表
+        println!("{}", "═══ Available Agents ═══".bright_black());
+        println!();
+        let manager = SubagentManager::new();
+        let capabilities = manager.list_capabilities();
+
+        for cap in &capabilities {
+            let current_marker = if matches!(&self.agent, AgentType::Anthropic(_) if cap.agent_type == NewAgentType::Main) {
+                " (current)".bright_green()
+            } else {
+                "".normal()
+            };
+
+            println!("  {}{} - {}", cap.name.bright_white(), current_marker, cap.description.bright_black());
+            println!("    {}", format!("Tools: {}", cap.tools.join(", ")).dimmed());
+            if cap.read_only {
+                println!("    {} {}", "🔒".bright_red(), "Read-only".bright_red());
+            }
+            println!();
+        }
+
+        // 可用工具列表
+        println!("{}", "═══ Available Tools ═══".bright_black());
+        println!();
+        let tools = vec![
+            ("read", "Read file contents"),
+            ("write", "Write or create files"),
+            ("edit", "Edit specific parts of a file"),
+            ("delete", "Delete files or directories"),
+            ("shell_execute", "Execute shell commands"),
+            ("grep", "Search for patterns in files"),
+            ("scan", "Scan directory structure"),
+            ("mkdir", "Create directories"),
+            ("glob", "Match files using patterns"),
+            ("multi_edit", "Edit multiple files at once"),
+            ("notebook_edit", "Edit Jupyter notebooks"),
+            ("ask_user_question", "Ask the user questions"),
+            ("task", "Spawn background tasks"),
+            ("task_output", "Get background task output"),
+        ];
+
+        for (tool, description) in tools {
+            println!("  {} - {}", tool.bright_cyan(), description.bright_black());
+        }
+        println!();
+
+        // 使用示例
+        println!("{}", "═══ Usage Examples ═══".bright_black());
+        println!();
+        println!("  {}", "Basic Chat:".bright_yellow());
+        println!("    {}", "Hello, how are you?".dimmed());
+        println!();
+        println!("  {}", "Session Management:".bright_yellow());
+        println!("    {}", "/sessions".dimmed());
+        println!("    {}", "/load abc123".dimmed());
+        println!();
+        println!("  {}", "Agent Switching:".bright_yellow());
+        println!("    {}", "/agent list".dimmed());
+        println!("    {}", "/agent switch explore".dimmed());
+        println!();
+        println!("  {}", "Configuration:".bright_yellow());
+        println!("    {}", "/config show".dimmed());
+        println!("    {}", "/config validate".dimmed());
+        println!();
+
+        // 提示
+        println!("{}", "═══ Tips ═══".bright_black());
+        println!();
         println!(
             "{}",
-            "💡 You can also type any message to chat with the AI!".bright_white()
+            "💡 You can type any message to chat with the AI!".bright_white()
         );
         println!(
             "{}",
             "⌨️  Press Tab after typing '/' to see available commands".bright_blue()
         );
+        println!(
+            "{}",
+            "🤖 Use different agents for specific tasks (explore, plan, code_reviewer)".bright_blue()
+        );
+        println!(
+            "{}",
+            "🔧 Tools are automatically available to the AI agent".bright_blue()
+        );
         println!();
+
         Ok(())
     }
 

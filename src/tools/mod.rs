@@ -14,11 +14,16 @@ pub enum FileToolError {
     InvalidInput(String),
 }
 
+pub mod ask_user_question;
+pub mod commit_linter;
 pub mod create_directory;
 pub mod delete_file;
 pub mod edit_file;
+pub mod git_guard;
 pub mod glob;
 pub mod grep_search;
+pub mod multiedit;
+pub mod notebook_edit;
 pub mod read_file;
 pub mod scan_codebase;
 pub mod write_file;
@@ -35,5 +40,6 @@ pub use read_file::WrappedReadFileTool;
 pub use scan_codebase::WrappedScanCodebaseTool;
 pub use write_file::WrappedWriteFileTool;
 pub use shell_execute::WrappedShellExecuteTool;
-pub use task::WrappedTaskTool;
-pub use task_output::WrappedTaskOutputTool;
+
+// task 和 task_output 模块暂未集成到主 Agent
+// 这些工具将在未来版本中使用

@@ -1,4 +1,6 @@
 use super::FileToolError;
+use super::git_guard::GitGuard;
+use super::commit_linter::CommitLinter;
 use colored::*;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
@@ -103,6 +105,9 @@ impl Tool for WrappedShellExecuteTool {
         println!();
         println!("{} {}({})", "●".bright_green(), "Exec", args.command);
 
+        // Git 安全检查
+        Self::check_git_safety(&args.command);
+
         let result = self.inner.call(args).await;
 
         match &result {
@@ -133,5 +138,157 @@ impl Tool for WrappedShellExecuteTool {
         }
         println!();
         result
+    }
+}
+
+impl WrappedShellExecuteTool {
+    /// 检查 Git 命令的安全性
+    fn check_git_safety(command: &str) {
+        let command_lower = command.trim().to_lowercase();
+
+        // 检查是否是 Git 命令
+        if !command_lower.starts_with("git ") {
+            return;
+        }
+
+        // 尝试创建 Git Guard
+        let guard = match GitGuard::new() {
+            Ok(g) => g,
+            Err(_) => return, // 不在 Git 仓库中，跳过检查
+        };
+
+        // 检查特定的 Git 命令
+        if command_lower.contains("git push") {
+            // 检查是否在主分支上
+            guard.warn_if_pushing_to_main();
+
+            // 检查是否有 --force 标志
+            if command_lower.contains("--force") || command_lower.contains("-f") {
+                println!();
+                println!(
+                    "{} {}",
+                    "🚨".bright_red(),
+                    "警告: 强制推送将会重写 Git 历史".bright_red().bold()
+                );
+                println!(
+                    "  这可能导致: {}",
+                    "其他协作者的提交丢失、分支冲突".bright_yellow()
+                );
+                println!(
+                    "  如果确实需要, 请考虑使用: {}",
+                    "git push --force-with-lease".bright_cyan()
+                );
+                println!();
+            }
+        } else if command_lower.contains("git commit") {
+            // 验证 commit 消息
+            Self::validate_commit_message(command);
+
+            // 检查 Git 状态
+            let safety = guard.check_safety();
+            match safety {
+                super::git_guard::GitSafety::UncommittedChanges => {
+                    // 对于 commit 命令，这是正常的，不需要警告
+                }
+                super::git_guard::GitSafety::OnMainBranch { branch_name } => {
+                    println!();
+                    println!(
+                        "{} {}",
+                        "⚠️ ".bright_yellow(),
+                        "注意: 即将在主分支上提交".bright_yellow().bold()
+                    );
+                    println!("  当前分支: {}", branch_name.bright_white());
+                    println!();
+                }
+                _ => {}
+            }
+        } else if command_lower.contains("git checkout") || command_lower.contains("git switch") {
+            // 检查是否有未提交的更改
+            if let super::git_guard::GitSafety::UncommittedChanges = guard.check_safety() {
+                println!();
+                println!(
+                    "{} {}",
+                    "⚠️ ".bright_yellow(),
+                    "警告: 切换分支前有未提交的更改".bright_yellow().bold()
+                );
+                println!(
+                    "  建议: {} 或 {}",
+                    "git stash".bright_cyan(),
+                    "git commit".bright_cyan()
+                );
+                println!();
+            }
+        }
+    }
+
+    /// 验证 commit 消息格式
+    fn validate_commit_message(command: &str) {
+        // 检查是否包含 -m 参数（用于指定 commit 消息）
+        let parts: Vec<&str> = command.split(' ').collect();
+        let mut message_index = None;
+
+        for (i, part) in parts.iter().enumerate() {
+            if *part == "-m" || part.starts_with("-m=") {
+                if *part == "-m" && i + 1 < parts.len() {
+                    message_index = Some(i + 1);
+                } else if part.starts_with("-m=") {
+                    // 提取 -m="message" 格式中的消息
+                    let msg = part.strip_prefix("-m=").unwrap_or("");
+                    Self::check_commit_format(msg);
+                    return;
+                }
+                break;
+            }
+        }
+
+        if let Some(idx) = message_index {
+            if let Some(&message) = parts.get(idx) {
+                // 去除可能的引号
+                let message = message.trim_matches('"').trim_matches('\'');
+                Self::check_commit_format(message);
+            }
+        }
+    }
+
+    /// 检查 commit 消息格式
+    fn check_commit_format(message: &str) {
+        let linter = match CommitLinter::new() {
+            Ok(l) => l,
+            Err(_) => return, // 如果 linter 创建失败，跳过检查
+        };
+
+        let result = linter.validate(message);
+
+        // 显示验证结果
+        if !result.valid {
+            println!();
+            println!(
+                "{} {}",
+                "✗".bright_red(),
+                "Commit 消息格式无效".bright_red()
+            );
+            for error in &result.errors {
+                println!("  {}", error.dimmed());
+            }
+            println!();
+        } else if !result.warnings.is_empty() {
+            println!();
+            println!(
+                "{} {}",
+                "⚠️".bright_yellow(),
+                "Commit 消息格式建议".bright_yellow()
+            );
+            for warning in &result.warnings {
+                println!("  {}", warning.dimmed());
+            }
+            println!();
+        } else {
+            // 验证通过，显示简洁的成功信息
+            let type_str = result.commit_type.as_deref().unwrap_or("unknown");
+            println!(
+                "  └─ {}",
+                format!("✓ Commit 格式: {}", type_str).dimmed()
+            );
+        }
     }
 }

@@ -2,6 +2,8 @@
 //!
 //! 检索后台任务的输出。
 
+#![allow(dead_code)]
+
 use super::FileToolError;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};

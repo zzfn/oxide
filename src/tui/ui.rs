@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, Paragraph, Wrap},
+    widgets::{List, ListItem, Paragraph, Wrap, Block, Borders},
     Frame,
 };
 
@@ -12,6 +12,12 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     // kota 风格的简洁布局
     let help_height = 1;
+
+    // 如果显示帮助面板，覆盖整个屏幕
+    if app.show_help {
+        render_help_panel(frame, app, size);
+        return;
+    }
 
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -24,9 +30,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         ])
         .split(size);
 
-    render_separator(frame, main_chunks[0]);
+    render_separator(frame, main_chunks[0], &app.theme);
     render_messages_simple(frame, app, main_chunks[1]);
-    render_separator(frame, main_chunks[2]);
+    render_separator(frame, main_chunks[2], &app.theme);
     render_input_simple(frame, app, main_chunks[3]);
     render_help_bar(frame, app, main_chunks[4]);
 
@@ -37,10 +43,60 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 /// 渲染分隔线（kota 风格）
-fn render_separator(frame: &mut Frame, area: Rect) {
+fn render_separator(frame: &mut Frame, area: Rect, theme: &crate::tui::Theme) {
     let separator = "-".repeat(area.width as usize);
-    let line = Line::from(separator).style(Style::default().fg(Color::DarkGray));
+    let line = Line::from(separator).style(theme.border_style());
     frame.render_widget(Paragraph::new(line), area);
+}
+
+/// 渲染帮助面板
+fn render_help_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let help_text = vec![
+        Line::from(vec![
+            Span::styled("Oxide TUI 帮助", Style::default().fg(app.theme.colors.primary).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("快捷键:", Style::default().add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from("  Ctrl+C      退出"),
+        Line::from("  ?           显示/隐藏帮助"),
+        Line::from("  /           进入命令模式"),
+        Line::from("  Enter       发送消息"),
+        Line::from("  ↑/↓         滚动查看消息"),
+        Line::from("  PageUp/Down 快速滚动"),
+        Line::from("  Home        滚动到顶部"),
+        Line::from("  End         滚动到底部"),
+        Line::from("  Ctrl+P/N    浏览历史记录"),
+        Line::from("  Ctrl+T      切换工具面板"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("斜杠命令:", Style::default().add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from("  /help        显示此帮助"),
+        Line::from("  /agent       管理代理"),
+        Line::from("  /tasks       管理任务"),
+        Line::from("  /config      管理配置"),
+        Line::from("  /theme       切换主题"),
+        Line::from("  /clear       清空消息"),
+        Line::from("  /toggle-tools 切换工具面板"),
+        Line::from(""),
+        Line::from("按任意键关闭帮助"),
+    ];
+
+    let paragraph = Paragraph::new(help_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(app.theme.border_style())
+                .title("帮助")
+        )
+        .wrap(Wrap { trim: false })
+        .alignment(Alignment::Left);
+
+    frame.render_widget(paragraph, area);
 }
 
 
@@ -289,38 +345,38 @@ fn render_messages_simple(frame: &mut Frame, app: &App, area: Rect) {
         for line in banner.lines() {
             all_lines.push(Line::from(vec![Span::styled(
                 line,
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                app.theme.success_style().add_modifier(Modifier::BOLD),
             )]));
         }
         // 添加分隔线
         all_lines.push(Line::from(vec![Span::styled(
             "-".repeat(area.width as usize),
-            Style::default().fg(Color::DarkGray),
+            app.theme.border_style(),
         )]));
         all_lines.push(Line::from(""));
     }
 
     for msg in &app.messages {
-        let (prefix, color): (String, Color) = match msg.msg_type {
-            MessageType::User => ("❯ ".to_string(), Color::Cyan),
-            MessageType::Assistant => ("● oxide: ".to_string(), Color::Blue),
+        let (prefix, style) = match msg.msg_type {
+            MessageType::User => ("❯ ".to_string(), app.theme.user_message_style()),
+            MessageType::Assistant => ("● oxide: ".to_string(), app.theme.assistant_message_style()),
             MessageType::Tool => {
                 let name = msg.tool_name.as_deref().unwrap_or("tool");
-                (format!("⚙ {} · ", name), Color::Yellow)
+                (format!("⚙ {} · ", name), app.theme.tool_message_style())
             }
         };
 
         // 添加消息前缀
         all_lines.push(Line::from(vec![Span::styled(
             prefix,
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
+            style.add_modifier(Modifier::BOLD),
         )]));
 
         // 添加消息内容（支持多行）
         for line in msg.content.lines() {
             all_lines.push(Line::from(vec![Span::styled(
                 format!("  {}", line),
-                Style::default().fg(Color::White),
+                app.theme.background_style(),
             )]));
         }
 
@@ -361,17 +417,17 @@ fn render_messages_simple(frame: &mut Frame, app: &App, area: Rect) {
 fn render_input_simple(frame: &mut Frame, app: &App, area: Rect) {
     // 检查是否是命令，如果是则高亮显示
     let is_command = app.input.starts_with('/');
-    let input_color = if is_command {
-        Color::Green
+    let input_style = if is_command {
+        app.theme.command_highlight_style()
     } else {
-        Color::White
+        app.theme.background_style()
     };
 
     let input_text = vec![Line::from(vec![
-        Span::styled("❯ ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled("❯ ", app.theme.input_prompt_style().add_modifier(Modifier::BOLD)),
         Span::styled(
             &app.input,
-            Style::default().fg(input_color).add_modifier(Modifier::BOLD),
+            input_style.add_modifier(Modifier::BOLD),
         ),
     ])];
 
@@ -382,17 +438,17 @@ fn render_input_simple(frame: &mut Frame, app: &App, area: Rect) {
 fn render_help_bar(frame: &mut Frame, app: &App, area: Rect) {
     // 显示状态信息：模型名称和会话 ID（简化版）
     let spans = vec![
-        Span::styled("model: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(&app.model, Style::default().fg(Color::Blue)),
+        Span::styled("model: ", app.theme.help_text_style()),
+        Span::styled(&app.model, app.theme.primary_style()),
         Span::raw(" │ "),
-        Span::styled("session: ", Style::default().fg(Color::DarkGray)),
+        Span::styled("session: ", app.theme.help_text_style()),
         Span::styled(
             // 只显示会话 ID 的前 8 个字符
             format!("{}", &app.session_id.chars().take(8).collect::<String>()),
-            Style::default().fg(Color::Magenta)
+            app.theme.secondary_style()
         ),
         Span::raw(" │ "),
-        Span::styled("Type /help for commands", Style::default().fg(Color::DarkGray)),
+        Span::styled("Type /help for commands or ? for help", app.theme.help_text_style()),
     ];
 
     frame.render_widget(

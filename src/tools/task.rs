@@ -2,6 +2,8 @@
 //!
 //! 启动和管理后台任务。
 
+#![allow(dead_code)]
+
 use super::FileToolError;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};

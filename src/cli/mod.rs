@@ -71,6 +71,10 @@ impl Default for OxideHelper {
             "/delete".to_string(),
             CommandInfo::new("/delete <session_id>", "删除指定会话"),
         );
+        commands.insert(
+            "/agent".to_string(),
+            CommandInfo::new("/agent [list|switch <type>]", "管理 Agent 类型"),
+        );
 
         Self {
             completer: FilenameCompleter::new(),
