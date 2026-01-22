@@ -3,13 +3,14 @@ pub mod render;
 
 use anyhow::Result;
 use colored::*;
-use dialoguer::Select;
+use dialoguer::FuzzySelect;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::validate::{self, MatchingBracketValidator, Validator};
-use rustyline::Editor;
+use rustyline::{Cmd, CompletionType, Config, Editor, EventHandler, KeyCode, KeyEvent, Modifiers};
+use rustyline::{ConditionalEventHandler, Event, EventContext, RepeatCount};
 use rustyline::{Context, Helper};
 use std::borrow::Cow::{self, Borrowed, Owned};
 use std::collections::HashMap;
@@ -125,6 +126,23 @@ impl Hinter for OxideHelper {
     type Hint = String;
 
     fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
+        // 如果输入以 / 开头，提供命令补全提示
+        if line.starts_with('/') && !line.is_empty() {
+            let input = &line[..pos];
+            // 找到第一个匹配的命令，返回剩余部分作为提示
+            let mut matched_commands: Vec<_> = self
+                .commands
+                .keys()
+                .filter(|cmd| cmd.starts_with(input) && *cmd != input)
+                .collect();
+            matched_commands.sort();
+
+            if let Some(cmd) = matched_commands.first() {
+                return Some(cmd[input.len()..].to_string());
+            }
+        }
+
+        // 否则使用历史提示
         self.hinter.hint(line, pos, ctx)
     }
 }
@@ -182,6 +200,72 @@ impl Validator for OxideHelper {
 
 impl Helper for OxideHelper {}
 
+// ============================================================================
+// 触发符处理器 - 拦截 /、@、# 按键
+// ============================================================================
+
+/// 特殊字符触发处理器
+/// 当用户在空行输入 /、@、# 时，立即结束输入并弹出对应选择器
+struct TriggerHandler {
+    trigger_char: char,
+}
+
+impl TriggerHandler {
+    fn new(trigger_char: char) -> Self {
+        Self { trigger_char }
+    }
+}
+
+impl ConditionalEventHandler for TriggerHandler {
+    fn handle(
+        &self,
+        _evt: &Event,
+        _n: RepeatCount,
+        _positive: bool,
+        ctx: &EventContext<'_>,
+    ) -> Option<Cmd> {
+        // 只在空行时触发
+        if ctx.line().is_empty() {
+            // 先插入触发字符，然后立即接受输入
+            Some(Cmd::Insert(1, self.trigger_char.to_string()))
+        } else {
+            // 非空行时，使用默认行为（插入字符）
+            None
+        }
+    }
+}
+
+/// 触发符类型
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TriggerType {
+    /// / - 命令菜单
+    Command,
+    /// @ - 上下文/文件引用
+    Context,
+    /// # - 标签/话题
+    Tag,
+}
+
+impl TriggerType {
+    fn from_char(c: char) -> Option<Self> {
+        match c {
+            '/' => Some(TriggerType::Command),
+            '@' => Some(TriggerType::Context),
+            '#' => Some(TriggerType::Tag),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn prompt(&self) -> &'static str {
+        match self {
+            TriggerType::Command => "选择命令",
+            TriggerType::Context => "选择上下文",
+            TriggerType::Tag => "选择标签",
+        }
+    }
+}
+
 pub const LOGO: &str = r#"
  _______          _________ ______   _______
 (  ___  )|\     /|\__   __/(  __  \ (  ____ \
@@ -238,7 +322,7 @@ impl OxideCli {
         Ok(())
     }
 
-    /// 显示命令选择器
+    /// 显示命令选择器（支持模糊搜索）
     fn show_command_selector(&self) -> Result<String> {
         // 获取 OxideHelper 中的命令信息
         let helper = OxideHelper::default();
@@ -253,9 +337,9 @@ impl OxideCli {
         // 按命令名称排序
         command_items.sort();
 
-        // 显示选择器
-        let selection = Select::new()
-            .with_prompt("请选择命令")
+        // 使用 FuzzySelect 支持模糊搜索
+        let selection = FuzzySelect::new()
+            .with_prompt("选择命令 (输入过滤)")
             .items(&command_items)
             .default(0)
             .interact()?;
@@ -270,9 +354,89 @@ impl OxideCli {
         Ok(selected)
     }
 
+    /// 显示上下文选择器（@ 触发）
+    fn show_context_selector(&self) -> Result<String> {
+        // TODO: 实现文件/上下文选择
+        let context_items = vec![
+            "@file - 引用文件",
+            "@codebase - 搜索代码库",
+            "@web - 搜索网页",
+            "@docs - 搜索文档",
+        ];
+
+        let selection = FuzzySelect::new()
+            .with_prompt("选择上下文 (输入过滤)")
+            .items(&context_items)
+            .default(0)
+            .interact()?;
+
+        let selected = context_items[selection]
+            .split(" - ")
+            .next()
+            .unwrap_or("@")
+            .to_string();
+
+        Ok(selected)
+    }
+
+    /// 显示标签选择器（# 触发）
+    fn show_tag_selector(&self) -> Result<String> {
+        // TODO: 实现标签选择
+        let tag_items = vec![
+            "#bug - 问题修复",
+            "#feature - 新功能",
+            "#refactor - 重构",
+            "#docs - 文档",
+        ];
+
+        let selection = FuzzySelect::new()
+            .with_prompt("选择标签 (输入过滤)")
+            .items(&tag_items)
+            .default(0)
+            .interact()?;
+
+        let selected = tag_items[selection]
+            .split(" - ")
+            .next()
+            .unwrap_or("#")
+            .to_string();
+
+        Ok(selected)
+    }
+
+    /// 根据触发符类型显示对应选择器
+    fn show_trigger_selector(&self, trigger: TriggerType) -> Result<String> {
+        match trigger {
+            TriggerType::Command => self.show_command_selector(),
+            TriggerType::Context => self.show_context_selector(),
+            TriggerType::Tag => self.show_tag_selector(),
+        }
+    }
+
     async fn run_input_loop(&mut self) -> Result<()> {
-        let mut rl = Editor::new()?;
+        // 配置 rustyline：使用 List 类型补全，显示所有候选项
+        let config = Config::builder()
+            .completion_type(CompletionType::List) // 按 Tab 显示完整列表
+            .completion_prompt_limit(20) // 超过 20 个候选项时询问是否显示
+            .build();
+
+        let mut rl = Editor::with_config(config)?;
         rl.set_helper(Some(OxideHelper::default()));
+
+        // 绑定触发符按键处理器
+        // 当在空行输入 /、@、# 时，立即插入字符（用户需要按回车确认）
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Char('/'), Modifiers::NONE),
+            EventHandler::Conditional(Box::new(TriggerHandler::new('/'))),
+        );
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Char('@'), Modifiers::NONE),
+            EventHandler::Conditional(Box::new(TriggerHandler::new('@'))),
+        );
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Char('#'), Modifiers::NONE),
+            EventHandler::Conditional(Box::new(TriggerHandler::new('#'))),
+        );
 
         loop {
             self.print_separator()?;
@@ -285,19 +449,31 @@ impl OxideCli {
                         continue;
                     }
 
-                    // 检测是否输入了 "/"，如果是则弹出命令选择器
-                    let final_input = if input == "/" {
-                        println!("{}", "检测到 / 命令，正在打开选择器...".dimmed());
-                        match self.show_command_selector() {
-                            Ok(selected) => {
-                                println!("\n{} {}", "✓".green(), selected.bright_green());
-                                selected
+                    // 检测触发符：/、@、#
+                    let first_char = input.chars().next().unwrap_or(' ');
+                    let trigger = TriggerType::from_char(first_char);
+
+                    let final_input = if let Some(trigger_type) = trigger {
+                        // 如果只输入了单个触发符，弹出选择器
+                        if input.len() == 1 {
+                            match self.show_trigger_selector(trigger_type) {
+                                Ok(selected) => {
+                                    println!("\n{} {}", "✓".green(), selected.bright_green());
+                                    selected
+                                }
+                                Err(e) => {
+                                    // 用户取消选择（如按 Esc）
+                                    println!(
+                                        "\n{} {}",
+                                        "⚠️".yellow(),
+                                        format!("选择取消: {}", e)
+                                    );
+                                    continue;
+                                }
                             }
-                            Err(e) => {
-                                // 用户取消选择（如按 Esc）
-                                println!("\n{} {}", "⚠️".yellow(), format!("选择失败: {}", e));
-                                continue;
-                            }
+                        } else {
+                            // 已经输入了完整内容，直接使用
+                            input.to_string()
                         }
                     } else {
                         input.to_string()

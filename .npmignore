@@ -1,0 +1,48 @@
+# Rust source
+src/
+target/
+Cargo.toml
+Cargo.lock
+
+# Rust build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# Development files
+.env
+.env.example
+.oxide/
+sessions/
+
+# Git
+.git/
+.gitignore
+.github/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# CI/CD
+.gitattributes
+
+# Documentation (already in README)
+LICENSE
+AGENTS.md
+CLAUDE.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests
+tests/
+*.rs.bk
+
+# Other projects
+kota/

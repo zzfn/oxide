@@ -1,0 +1,14 @@
+#!/bin/sh
+# Oxide CLI - npm wrapper script
+
+# 获取实际二进制文件位置
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+BINARY="$BIN_DIR/../lib/oxide"
+
+# 如果 lib/oxide 不存在，尝试使用 bin 目录下的二进制
+if [ ! -f "$BINARY" ]; then
+    BINARY="$BIN_DIR/oxide"
+fi
+
+# 执行二进制文件
+exec "$BINARY" "$@"
