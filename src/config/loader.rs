@@ -47,9 +47,6 @@ pub struct TomlConfig {
     pub theme: Option<ThemeConfig>,
 
     #[serde(default)]
-    pub tui: Option<TuiConfig>,
-
-    #[serde(default)]
     pub features: Option<FeaturesConfig>,
 }
 
@@ -120,22 +117,6 @@ pub struct ThemeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TuiConfig {
-    #[serde(default)]
-    pub layout_mode: String,
-
-    #[serde(default = "default_bool_true")]
-    pub streaming_enabled: bool,
-
-    #[serde(default = "default_bool_true")]
-    pub typewriter_effect: bool,
-}
-
-fn default_bool_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeaturesConfig {
     #[serde(default)]
     pub enable_mcp: bool,
@@ -159,7 +140,6 @@ impl Default for TomlConfig {
             default: DefaultConfig::default(),
             agent: None,
             theme: None,
-            tui: None,
             features: None,
         }
     }
@@ -222,11 +202,6 @@ impl ConfigLoader {
         // 合并 theme 配置
         if overlay.theme.is_some() {
             base.theme = overlay.theme;
-        }
-
-        // 合并 tui 配置
-        if overlay.tui.is_some() {
-            base.tui = overlay.tui;
         }
 
         // 合并 features 配置
@@ -300,7 +275,6 @@ impl ConfigLoader {
             project_instructions,
             agent_configs: config.agent,
             theme_config: config.theme,
-            tui_config: config.tui,
             features_config: config.features.unwrap_or_default(),
         })
     }
@@ -328,8 +302,6 @@ pub struct LoadedConfig {
     pub agent_configs: Option<AgentConfigs>,
     #[allow(dead_code)]
     pub theme_config: Option<ThemeConfig>,
-    #[allow(dead_code)]
-    pub tui_config: Option<TuiConfig>,
     #[allow(dead_code)]
     pub features_config: FeaturesConfig,
 }

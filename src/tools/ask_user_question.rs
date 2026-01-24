@@ -11,9 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-#[cfg(feature = "cli")]
-use dialoguer::{MultiSelect, Select};
-
 /// 问题选项
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct QuestionOption {
@@ -177,84 +174,8 @@ impl AskUserQuestionTool {
         }
     }
 
-    /// 显示单个问题并收集答案 (TUI 模式)
-    #[cfg(feature = "cli")]
-    fn ask_question_tui(question: &Question) -> Result<Answer, FileToolError> {
-        // 构建选项显示文本
-        let option_items: Vec<String> = question
-            .options
-            .iter()
-            .map(|opt| format!("{} - {}", opt.label, opt.description))
-            .collect();
-
-        if question.multi_select {
-            // 多选模式
-            let selections = MultiSelect::new()
-                .with_prompt(format!("{}\n{}", question.question, "(使用空格选择, 回车确认)"))
-                .items(&option_items)
-                .interact()
-                .map_err(|e| FileToolError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
-
-            if selections.is_empty() {
-                Ok(Answer {
-                    question_header: question.header.clone(),
-                    selected: serde_json::json!(null),
-                    has_answer: false,
-                })
-            } else {
-                let selected_labels: Vec<String> = selections
-                    .iter()
-                    .filter_map(|&i| question.options.get(i).map(|o| o.label.clone()))
-                    .collect();
-
-                Ok(Answer {
-                    question_header: question.header.clone(),
-                    selected: serde_json::json!(selected_labels),
-                    has_answer: true,
-                })
-            }
-        } else {
-            // 单选模式
-            let selection = Select::new()
-                .with_prompt(question.question.clone())
-                .items(&option_items)
-                .interact_opt()
-                .map_err(|e| FileToolError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
-
-            match selection {
-                Some(index) => {
-                    let selected_label = &question.options[index].label;
-                    Ok(Answer {
-                        question_header: question.header.clone(),
-                        selected: serde_json::json!(selected_label),
-                        has_answer: true,
-                    })
-                }
-                None => Ok(Answer {
-                    question_header: question.header.clone(),
-                    selected: serde_json::json!(null),
-                    has_answer: false,
-                }),
-            }
-        }
-    }
-
     /// 显示单个问题并收集答案 (自动选择模式)
     fn ask_question(question: &Question) -> Result<Answer, FileToolError> {
-        // 检测是否在 TUI 环境中
-        // 如果环境变量 OXIDE_TUI_MODE 设置为 "1"，则使用 TUI 模式
-        let is_tui = std::env::var("OXIDE_TUI_MODE")
-            .ok()
-            .map(|v| v == "1")
-            .unwrap_or(false);
-
-        #[cfg(feature = "cli")]
-        {
-            if is_tui {
-                return Self::ask_question_tui(question);
-            }
-        }
-
         // 默认使用 CLI 模式
         Self::ask_question_cli(question)
     }

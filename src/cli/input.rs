@@ -41,7 +41,7 @@ impl InstantInput {
         commands.insert("/help".to_string(), CommandInfo::new("/help", "显示帮助信息"));
         commands.insert(
             "/toggle-tools".to_string(),
-            CommandInfo::new("/toggle-tools", "切换工具显示"),
+            CommandInfo::new("/toggle-tools", "显示工具状态"),
         );
         commands.insert("/history".to_string(), CommandInfo::new("/history", "显示对话历史"));
         commands.insert("/load".to_string(), CommandInfo::new("/load <session_id>", "加载指定会话"));

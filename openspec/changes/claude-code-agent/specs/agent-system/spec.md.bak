@@ -1,0 +1,74 @@
+## ADDED Requirements
+
+### Requirement: Claude Code Bridge Agent
+系统 SHALL 支持新的 `ClaudeCodeBridge` Agent 类型，该 Agent 能够将任务委托给 Claude Code 执行。
+
+#### Scenario: 创建 Claude Code Bridge Agent
+- **WHEN** 使用 `AgentBuilder::build_claude_code_bridge()` 方法
+- **THEN** 系统 SHALL 创建 `AgentEnum::ClaudeCodeBridge` 实例
+- **AND** Agent SHALL 配置为委托模式
+- **AND** Agent SHALL 具有相应的系统提示词
+
+#### Scenario: Bridge Agent 系统提示词
+- **WHEN** Claude Code Bridge Agent 被创建
+- **THEN** 系统提示词 SHALL 说明此 Agent 会委托任务
+- **AND** 提示词 SHALL 告知用户任务将由 Claude Code 执行
+- **AND** 提示词 SHALL 说明输出将被解析为结构化 JSON
+
+#### Scenario: Bridge Agent 工具配置
+- **WHEN** 使用 Claude Code Bridge Agent
+- **THEN** Agent SHALL 不激活 Oxide 的工具系统
+- **AND** Agent SHALL 依赖 Claude Code 的工具执行
+- **AND** 避免 Oxide 和 Claude Code 之间的工具冲突
+
+### Requirement: Agent 类型枚举扩展
+`AgentType` 枚举 SHALL 包含新的 `ClaudeCodeBridge` 类型。
+
+#### Scenario: 枚举定义
+- **WHEN** 定义 `AgentType` 枚举
+- **THEN** SHALL 包含 `ClaudeCodeBridge` 变体
+- **AND** 变体值 SHALL 为 `AgentType::ClaudeCodeBridge`
+
+#### Scenario: 构建指定类型的 Agent
+- **WHEN** 调用 `AgentBuilder::build_with_type(AgentType::ClaudeCodeBridge)`
+- **THEN** 系统 SHALL 调用 `build_claude_code_bridge()` 方法
+- **AND** 返回配置好的 Bridge Agent
+
+### Requirement: Agent 状态管理
+系统 SHALL 管理当前使用的 Agent 类型（普通或桥接）。
+
+#### Scenario: 切换到 Bridge Agent
+- **WHEN** 用户执行 `/bridge on` 命令
+- **THEN** 系统 SHALL 创建 Claude Code Bridge Agent
+- **AND** 系统 SHALL 替换当前活动的 Agent
+- **AND** 系统 SHALL 更新内部状态记录
+
+#### Scenario: 切换回普通 Agent
+- **WHEN** 用户执行 `/bridge off` 命令
+- **THEN** 系统 SHALL 恢复之前的 Agent 类型
+- **AND** 系统 SHALL 清理 Bridge Agent 资源
+- **AND** 系统 SHALL 更新内部状态记录
+
+### Requirement: Agent 类型名称
+`AgentEnum` SHALL 为 Bridge Agent 提供类型名称。
+
+#### Scenario: 获取 Bridge Agent 类型名称
+- **WHEN** 调用 `AgentEnum::type_name()` 方法
+- **AND** Agent 是 ClaudeCodeBridge 类型
+- **THEN** 返回 "claude-code-bridge"
+- **AND** 名称 SHALL 可用于日志和显示
+
+### Requirement: Bridge Agent 验证
+系统 SHALL 在创建 Bridge Agent 前验证必要条件。
+
+#### Scenario: 验证 Claude Code 可用性
+- **WHEN** 尝试创建 Claude Code Bridge Agent
+- **THEN** 系统 SHALL 检查 Claude Code 是否已安装
+- **AND** 系统 SHALL 验证 Claude Code 可执行文件路径
+- **AND** 如果验证失败，返回错误并说明原因
+
+#### Scenario: 验证配置有效性
+- **WHEN** 尝试创建 Claude Code Bridge Agent
+- **THEN** 系统 SHALL 验证桥接配置
+- **AND** 系统 SHALL 检查输出目录是否可写
+- **AND** 如果配置无效，返回错误并说明原因

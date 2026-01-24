@@ -38,8 +38,7 @@ impl OxideCli {
                 println!("{} Usage: /config [show|edit|reload|validate]", "💡".bright_blue());
             }
             "/toggle-tools" => {
-                println!("{}", "🔧 Tool toggle is available in TUI mode".bright_yellow());
-                println!("   In CLI mode, tools are always enabled");
+                println!("{}", "🔧 当前仅支持 CLI 模式，工具默认启用".bright_yellow());
                 println!();
             }
             "/help" => {

@@ -9,9 +9,6 @@ mod task;
 #[cfg(feature = "cli")]
 mod cli;
 
-// TUI module is temporarily disabled during refactor
-// #[cfg(feature = "tui")]
-// mod tui;
 
 use anyhow::{Context, Result};
 use config::Config;

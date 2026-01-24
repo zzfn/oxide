@@ -326,7 +326,6 @@ oxide/
 │   │   ├── edit_file.rs
 │   │   ├── grep_search.rs
 │   │   └── ...
-│   └── tui/           # TUI 界面
 ├── docs/               # 文档
 │   └── architecture.md # 架构文档
 ├── .oxide/             # 会话数据目录

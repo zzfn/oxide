@@ -247,7 +247,6 @@ pub fn render(output: Output, format: RenderFormat) -> String {
 | Rustyline | 高级命令行编辑器 |
 | Dialoguer | 交互式选择器 |
 | Colored | 终端彩色输出 |
-| Ratatui | TUI 界面（可选） |
 
 ### LLM 集成
 
@@ -354,7 +353,6 @@ oxide/
 │   │   ├── edit_file.rs
 │   │   └── ...
 │   ├── task/                # 任务管理
-│   └── tui/                 # TUI 界面
 ├── openspec/                # OpenSpec 规范
 │   ├── specs/               # 当前能力规范
 │   ├── changes/             # 变更提案

@@ -75,12 +75,6 @@ temperature = 0.7
 mode = "dark"  # dark | light | auto
 custom_theme = "/path/to/theme.toml"
 
-# TUI 配置
-[tui]
-layout_mode = "split"  # split | tab
-streaming_enabled = true
-typewriter_effect = true
-
 # 功能开关
 [features]
 enable_mcp = false
@@ -98,7 +92,6 @@ pub struct Config {
     pub default: DefaultConfig,
     pub agent: Option<AgentConfigs>,
     pub theme: Option<ThemeConfig>,
-    pub tui: Option<TuiConfig>,
     pub features: Option<FeaturesConfig>,
 }
 
@@ -319,7 +312,6 @@ impl ConfigManager {
             },
             agent: None,
             theme: None,
-            tui: None,
             features: None,
         }
     }
@@ -540,9 +532,6 @@ enable_multimodal = false
 
 # 任务系统（后台任务管理）
 enable_task_system = true
-
-# TUI 界面
-enable_tui = false
 
 # 调试模式
 debug = false

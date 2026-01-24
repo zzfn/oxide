@@ -19,6 +19,8 @@ use std::time::{Duration, Instant};
 
 use crate::context::ContextManager;
 
+const PROMPT_CYCLE_COMMAND: &str = "__oxide_prompt_cycle__";
+
 // 命令信息结构
 #[derive(Clone, Debug)]
 struct CommandInfo {
@@ -445,78 +447,26 @@ impl Completer for OxideCompleter {
     }
 }
 
-/// 自定义 Prompt，在右侧显示会话信息和 token 计数
+/// 自定义 Prompt
 #[derive(Clone)]
 struct OxidePrompt {
-    /// 工作目录（左侧提示符）
-    working_dir: PathBuf,
-    /// Token 总数
-    total_tokens: Arc<AtomicU64>,
-    /// 会话 ID
-    session_id: String,
-    /// Agent 类型
-    agent_type: String,
+    /// 左侧提示符标签
+    label: PromptLabel,
 }
 
 impl OxidePrompt {
-    fn new(
-        working_dir: PathBuf,
-        total_tokens: Arc<AtomicU64>,
-        session_id: String,
-        agent_type: String,
-    ) -> Self {
-        Self {
-            working_dir,
-            total_tokens,
-            session_id,
-            agent_type,
-        }
-    }
-
-    /// 格式化 token 计数显示
-    fn format_tokens(&self) -> String {
-        let tokens = self.total_tokens.load(Ordering::Relaxed);
-        if tokens < 1000 {
-            format!("{} tokens", tokens)
-        } else if tokens < 1_000_000 {
-            format!("{:.1}k tokens", tokens as f64 / 1000.0)
-        } else {
-            format!("{:.2}M tokens", tokens as f64 / 1_000_000.0)
-        }
-    }
-
-    /// 获取简短的会话 ID（前 8 位）
-    fn short_session_id(&self) -> String {
-        if self.session_id.len() > 8 {
-            self.session_id[..8].to_string()
-        } else {
-            self.session_id.clone()
-        }
+    fn new(label: PromptLabel) -> Self {
+        Self { label }
     }
 }
 
 impl Prompt for OxidePrompt {
     fn render_prompt_left(&self) -> Cow<'_, str> {
-        // 显示当前目录名称（完整路径太长）
-        let dir_name = self
-            .working_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("oxide");
-
-        Cow::Owned(format!("{}> ", dir_name))
+        Cow::Owned(format!("{}> ", self.label.as_str()))
     }
 
     fn render_prompt_right(&self) -> Cow<'_, str> {
-        let session_display = format!("[{}]", self.short_session_id());
-        let agent_display = format!("@{}", self.agent_type);
-        let tokens_display = self.format_tokens();
-
-        // 组合右侧提示信息：会话ID | Agent | Token计数
-        Cow::Owned(format!(
-            "{} | {} | {}",
-            session_display, agent_display, tokens_display
-        ))
+        Cow::Borrowed("")
     }
 
     fn render_prompt_indicator(&self, _prompt_mode: PromptEditMode) -> Cow<'_, str> {
@@ -532,6 +482,32 @@ impl Prompt for OxidePrompt {
         _history_search: reedline::PromptHistorySearch,
     ) -> Cow<'_, str> {
         Cow::Borrowed("")
+    }
+}
+
+/// 左侧提示符标签
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PromptLabel {
+    Oxide,
+    Fast,
+    Plan,
+}
+
+impl PromptLabel {
+    fn as_str(self) -> &'static str {
+        match self {
+            PromptLabel::Oxide => "oxide",
+            PromptLabel::Fast => "fast",
+            PromptLabel::Plan => "plan",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            PromptLabel::Oxide => PromptLabel::Fast,
+            PromptLabel::Fast => PromptLabel::Plan,
+            PromptLabel::Plan => PromptLabel::Oxide,
+        }
     }
 }
 
@@ -586,6 +562,7 @@ pub struct OxideCli {
     pub model_name: String,
     pub agent: AgentType,
     pub context_manager: ContextManager,
+    prompt_label: PromptLabel,
     spinner: Spinner,
     total_tokens: Arc<AtomicU64>,
 }
@@ -602,6 +579,7 @@ impl OxideCli {
             model_name,
             agent,
             context_manager,
+            prompt_label: PromptLabel::Oxide,
             spinner: Spinner::new(),
             total_tokens: Arc::new(AtomicU64::new(0)),
         }
@@ -753,6 +731,21 @@ impl OxideCli {
                 ReedlineEvent::Menu("oxide_completion".to_string()),
             ]),
         );
+        keybindings.add_binding(
+            KeyModifiers::NONE,
+            KeyCode::BackTab,
+            ReedlineEvent::ExecuteHostCommand(PROMPT_CYCLE_COMMAND.to_string()),
+        );
+        keybindings.add_binding(
+            KeyModifiers::SHIFT,
+            KeyCode::Tab,
+            ReedlineEvent::ExecuteHostCommand(PROMPT_CYCLE_COMMAND.to_string()),
+        );
+        keybindings.add_binding(
+            KeyModifiers::NONE,
+            KeyCode::Tab,
+            ReedlineEvent::ExecuteHostCommand(PROMPT_CYCLE_COMMAND.to_string()),
+        );
 
         let edit_mode = Box::new(Emacs::new(keybindings));
         let completion_menu = IdeMenu::default()
@@ -771,20 +764,25 @@ impl OxideCli {
 
         let mut last_ctrl_c: Option<Instant> = None;
 
-        loop {
-            // 每次循环重新创建 prompt 以获取最新的会话信息
-            let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            let prompt = OxidePrompt::new(
-                working_dir,
-                self.total_tokens.clone(),
-                self.context_manager.session_id().to_string(),
-                self.agent.type_name().to_string(),
-            );
+        let mut skip_separator = false;
 
-            self.print_separator()?;
+        loop {
+            // 每次循环重新创建 prompt 以获取最新的显示信息
+            let prompt = OxidePrompt::new(self.prompt_label);
+
+            if skip_separator {
+                skip_separator = false;
+            } else {
+                self.print_separator()?;
+            }
             let readline = rl.read_line(&prompt);
             let final_input = match readline {
                 Ok(Signal::Success(line)) => {
+                    if line == PROMPT_CYCLE_COMMAND {
+                        self.prompt_label = self.prompt_label.next();
+                        skip_separator = true;
+                        continue;
+                    }
                     let input = line.trim().to_string();
                     if input.is_empty() {
                         continue;
@@ -823,7 +821,10 @@ impl OxideCli {
     }
 
     pub fn print_separator(&self) -> Result<()> {
-        let width = 80;
+        let width = crossterm::terminal::size()
+            .map(|(width, _)| width as usize)
+            .unwrap_or(80)
+            .max(1);
         let separator = "-".repeat(width);
         println!("{}", separator.dimmed());
         Ok(())
