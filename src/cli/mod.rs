@@ -1,4 +1,5 @@
 pub mod command;
+pub mod file_resolver;
 pub mod render;
 
 use anyhow::Result;
@@ -10,6 +11,8 @@ use reedline::{
     Span, Suggestion,
 };
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::context::ContextManager;
 
@@ -141,9 +144,28 @@ impl OxideCompleter {
         token: &str,
         span: Span,
     ) -> Vec<Suggestion> {
+        // 移除 @ 符号用于模糊匹配
+        let search_token = token.strip_prefix('@').unwrap_or(token);
+
         let mut suggestions: Vec<Suggestion> = entries
             .iter()
-            .filter(|(value, _)| value.starts_with(token))
+            .filter(|(value, _)| {
+                // 检查完整路径是否以 token 开头（精确匹配）
+                if value.starts_with(token) {
+                    return true;
+                }
+
+                // 如果不是精确匹配，尝试模糊匹配文件名部分
+                // 例如：@mod 应该匹配 @src/cli/mod.rs
+                let value_path = value.strip_prefix('@').unwrap_or(value);
+                let value_name = value_path
+                    .split('/')
+                    .last()
+                    .unwrap_or(value_path);
+
+                // 不区分大小写模糊匹配文件名
+                value_name.to_lowercase().contains(&search_token.to_lowercase())
+            })
             .map(|(value, description)| Suggestion {
                 value: value.clone(),
                 description: Some(description.clone()),
@@ -155,6 +177,234 @@ impl OxideCompleter {
             .collect();
         suggestions.sort_by(|a, b| a.value.cmp(&b.value));
         suggestions
+    }
+
+    /// 递归列出目录下的所有文件
+    ///
+    /// # 参数
+    /// - `base_dir`: 基础目录
+    ///
+    /// # 返回
+    /// - 目录下所有文件的路径列表
+    #[allow(dead_code)]
+    fn list_files_recursive(base_dir: &Path) -> Vec<PathBuf> {
+        use std::fs;
+
+        let mut files = Vec::new();
+
+        // 需要忽略的目录
+        let ignored_dirs = [
+            ".git",
+            "node_modules",
+            "target",
+            "dist",
+            "build",
+            ".venv",
+            "venv",
+            "__pycache__",
+            ".pytest_cache",
+            "vendor",
+            ".cache",
+        ];
+
+        if let Ok(read_dir) = fs::read_dir(base_dir) {
+            for entry in read_dir.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                let file_name = entry.file_name();
+
+                // 跳过隐藏文件和目录
+                if file_name.to_string_lossy().starts_with('.') {
+                    continue;
+                }
+
+                // 跳过忽略的目录
+                if path.is_dir() {
+                    let dir_name = file_name.to_string_lossy();
+                    if ignored_dirs.iter().any(|&ignored| ignored == dir_name) {
+                        continue;
+                    }
+
+                    // 递归扫描子目录
+                    files.extend(Self::list_files_recursive(&path));
+                } else if path.is_file() {
+                    files.push(path);
+                }
+            }
+        }
+
+        files
+    }
+
+    /// 构建文件路径补全项
+    fn build_file_entries(&self, path_str: &str) -> std::io::Result<Vec<(String, String)>> {
+        use std::fs;
+
+        let mut entries = Vec::new();
+
+        // 解析路径：判断是否包含目录分隔符
+        let has_directory_separator = path_str.contains('/') || path_str.contains('\\');
+
+        if has_directory_separator {
+            // 包含目录：扫描指定目录
+            let path = PathBuf::from(path_str);
+            let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let full_path = current_dir.join(&path);
+
+            let (scan_dir, file_prefix) = if full_path.exists() && full_path.is_dir() {
+                (full_path, String::new())
+            } else {
+                // 尝试分离目录和文件部分
+                if let Some(parent) = path.parent() {
+                    let parent_path = if parent.as_os_str().is_empty() {
+                        current_dir.clone()
+                    } else {
+                        current_dir.join(parent)
+                    };
+                    (parent_path, path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+                } else {
+                    (current_dir, String::new())
+                }
+            };
+
+            // 扫描指定目录
+            if let Ok(read_dir) = fs::read_dir(&scan_dir) {
+                for entry in read_dir.filter_map(|e| e.ok()) {
+                    let file_name = entry.file_name();
+                    let name = file_name.to_string_lossy().to_string();
+
+                    if name.starts_with('.') {
+                        continue;
+                    }
+
+                    // 应用文件名过滤
+                    if !file_prefix.is_empty() && !name.to_lowercase().contains(&file_prefix.to_lowercase()) {
+                        continue;
+                    }
+
+                    let file_type = entry.file_type();
+                    let display_path = if let Some(parent) = path.parent() {
+                        if parent.as_os_str().is_empty() {
+                            format!("@{}", name)
+                        } else {
+                            format!("@{}/{}", parent.display(), name)
+                        }
+                    } else {
+                        format!("@{}", name)
+                    };
+
+                    let description = if file_type.as_ref().map_or(false, |ft| ft.is_dir()) {
+                        "目录/".to_string()
+                    } else if file_type.as_ref().map_or(false, |ft| ft.is_file()) {
+                        if let Ok(metadata) = entry.metadata() {
+                            format_file_size(metadata.len())
+                        } else {
+                            "文件".to_string()
+                        }
+                    } else {
+                        "其他".to_string()
+                    };
+
+                    entries.push((display_path, description));
+                }
+            }
+        } else {
+            // 不包含目录：递归扫描当前目录下的所有文件
+            let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+            if path_str.is_empty() {
+                // 输入为空：只显示当前目录的直接子项
+                if let Ok(read_dir) = fs::read_dir(&current_dir) {
+                    for entry in read_dir.filter_map(|e| e.ok()) {
+                        let file_name = entry.file_name();
+                        let name = file_name.to_string_lossy().to_string();
+
+                        if name.starts_with('.') {
+                            continue;
+                        }
+
+                        let file_type = entry.file_type();
+                        let display_path = format!("@{}", name);
+
+                        let description = if file_type.as_ref().map_or(false, |ft| ft.is_dir()) {
+                            "目录/".to_string()
+                        } else if file_type.as_ref().map_or(false, |ft| ft.is_file()) {
+                            if let Ok(metadata) = entry.metadata() {
+                                format_file_size(metadata.len())
+                            } else {
+                                "文件".to_string()
+                            }
+                        } else {
+                            "其他".to_string()
+                        };
+
+                        entries.push((display_path, description));
+                    }
+                }
+            } else {
+                // 输入不为空：递归扫描所有文件进行模糊匹配
+                let all_files = Self::list_files_recursive(&current_dir);
+
+                for file_path in all_files {
+                    let file_name = file_path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    if file_name.starts_with('.') {
+                        continue;
+                    }
+
+                    // 模糊匹配文件名
+                    if !file_name.to_lowercase().contains(&path_str.to_lowercase()) {
+                        continue;
+                    }
+
+                    // 获取相对路径
+                    let relative_path = file_path.strip_prefix(&current_dir)
+                        .unwrap_or(&file_path);
+                    let display_path = format!("@{}", relative_path.display());
+
+                    // 获取文件大小
+                    let description = if let Ok(metadata) = fs::metadata(&file_path) {
+                        format_file_size(metadata.len())
+                    } else {
+                        "文件".to_string()
+                    };
+
+                    entries.push((display_path, description));
+                }
+
+                // 限制结果数量，避免太多
+                if entries.len() > 50 {
+                    entries.truncate(50);
+                }
+            }
+        }
+
+        // 排序：目录优先，然后按名称
+        entries.sort_by(|a, b| {
+            let a_is_dir = a.1.ends_with('/');
+            let b_is_dir = b.1.ends_with('/');
+            if a_is_dir && !b_is_dir {
+                std::cmp::Ordering::Less
+            } else if !a_is_dir && b_is_dir {
+                std::cmp::Ordering::Greater
+            } else {
+                a.0.cmp(&b.0)
+            }
+        });
+
+        Ok(entries)
+    }
+}
+
+/// 格式化文件大小
+fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
 }
 
@@ -173,7 +423,11 @@ impl Completer for OxideCompleter {
                     }
                 }
                 '@' => {
-                    return self.match_entries(&build_context_entries(), token, span);
+                    // 动态生成文件路径补全
+                    let path_str = &token[1..]; // 移除 @ 符号
+                    if let Ok(file_entries) = self.build_file_entries(path_str) {
+                        return self.match_entries(&file_entries, token, span);
+                    }
                 }
                 '#' => {
                     if is_line_start(line, start) {
@@ -420,6 +674,7 @@ impl OxideCli {
             .with_completer(Box::new(OxideCompleter))
             .with_menu(ReedlineMenu::EngineCompleter(Box::new(completion_menu)));
         let prompt = DefaultPrompt::default();
+        let mut last_ctrl_c: Option<Instant> = None;
 
         loop {
             self.print_separator()?;
@@ -430,11 +685,20 @@ impl OxideCli {
                     if input.is_empty() {
                         continue;
                     }
+                    last_ctrl_c = None;
                     input
                 }
                 Ok(Signal::CtrlC) => {
+                    let now = Instant::now();
+                    let should_exit = last_ctrl_c
+                        .map(|prev| now.duration_since(prev) <= Duration::from_secs(1))
+                        .unwrap_or(false);
                     println!("{}", "^C".dimmed());
-                    break;
+                    if should_exit {
+                        break;
+                    }
+                    last_ctrl_c = Some(now);
+                    continue;
                 }
                 Ok(Signal::CtrlD) => break,
                 Err(err) => {
@@ -464,5 +728,100 @@ impl OxideCli {
     #[allow(dead_code)]
     pub fn session_id(&self) -> &str {
         self.context_manager.session_id()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_list_files_recursive() {
+        // 创建临时目录结构
+        let temp_dir = TempDir::new().unwrap();
+        let base = temp_dir.path();
+
+        // 创建测试文件和目录
+        fs::create_dir_all(base.join("src")).unwrap();
+        fs::create_dir_all(base.join("tests")).unwrap();
+        fs::create_dir_all(base.join("target")).unwrap(); // 应该被忽略
+        fs::create_dir_all(base.join(".git")).unwrap(); // 应该被忽略
+
+        File::create(base.join("Cargo.toml")).unwrap();
+        File::create(base.join("README.md")).unwrap();
+        File::create(base.join("src/main.rs")).unwrap();
+        File::create(base.join("src/lib.rs")).unwrap();
+        File::create(base.join("tests/integration.rs")).unwrap();
+        File::create(base.join("target/test")).unwrap(); // 应该被忽略
+        File::create(base.join(".git/config")).unwrap(); // 应该被忽略
+
+        // 测试递归扫描
+        let files = OxideCompleter::list_files_recursive(base);
+
+        // 验证：应该找到非忽略目录下的文件
+        let file_names: Vec<_> = files
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+
+        assert!(file_names.contains(&"Cargo.toml".to_string()));
+        assert!(file_names.contains(&"README.md".to_string()));
+        assert!(file_names.contains(&"main.rs".to_string()));
+        assert!(file_names.contains(&"lib.rs".to_string()));
+        assert!(file_names.contains(&"integration.rs".to_string()));
+
+        // 验证：不应该包含被忽略目录下的文件
+        assert!(!file_names.contains(&"test".to_string())); // target/
+        assert!(!file_names.contains(&"config".to_string())); // .git/
+    }
+
+    #[test]
+    fn test_list_files_recursive_empty_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let base = temp_dir.path();
+
+        let files = OxideCompleter::list_files_recursive(base);
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_list_files_recursive_nested_structure() {
+        let temp_dir = TempDir::new().unwrap();
+        let base = temp_dir.path();
+
+        // 创建深层嵌套结构
+        fs::create_dir_all(base.join("a/b/c/d")).unwrap();
+        File::create(base.join("a/file1.rs")).unwrap();
+        File::create(base.join("a/b/file2.rs")).unwrap();
+        File::create(base.join("a/b/c/file3.rs")).unwrap();
+        File::create(base.join("a/b/c/d/file4.rs")).unwrap();
+
+        let files = OxideCompleter::list_files_recursive(base);
+
+        // 应该找到所有嵌套文件
+        assert_eq!(files.len(), 4);
+
+        let file_names: Vec<_> = files
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+
+        assert!(file_names.contains(&"file1.rs".to_string()));
+        assert!(file_names.contains(&"file2.rs".to_string()));
+        assert!(file_names.contains(&"file3.rs".to_string()));
+        assert!(file_names.contains(&"file4.rs".to_string()));
+    }
+
+    #[test]
+    fn test_format_file_size() {
+        assert_eq!(format_file_size(0), "0 B");
+        assert_eq!(format_file_size(512), "512 B");
+        assert_eq!(format_file_size(1024), "1.0 KB");
+        assert_eq!(format_file_size(1536), "1.5 KB");
+        assert_eq!(format_file_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_file_size(5 * 1024 * 1024), "5.0 MB");
     }
 }

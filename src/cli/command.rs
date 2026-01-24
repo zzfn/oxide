@@ -2,6 +2,7 @@ use crate::agent::{AgentType, NewAgentType, SubagentManager};
 use crate::context::SerializableMessage;
 use crate::hooks::SessionIdHook;
 use crate::skill::{SkillExecutor, SkillManager};
+use super::file_resolver::parse_file_references;
 use anyhow::Result;
 use colored::*;
 use rig::completion::Message;
@@ -113,8 +114,41 @@ impl OxideCli {
                 println!("{} Type /help for available commands", "💡".bright_blue());
             }
             _ => {
+                // 处理文件引用
+                let (parsed_input, file_refs) = parse_file_references(input);
+
+                // 显示文件引用信息
+                if !file_refs.is_empty() {
+                    println!();
+                    println!("{}", "📎 已引用文件:".bright_cyan());
+                    for ref_info in &file_refs {
+                        println!("  {}", ref_info.display_info());
+                    }
+                    println!();
+                }
+
+                // 构建完整的用户消息（包含文件内容）
+                let enhanced_input = if !file_refs.is_empty() {
+                    let mut enhanced = String::new();
+
+                    // 添加文件内容
+                    for ref_info in &file_refs {
+                        enhanced.push_str(&format!(
+                            "```file_path=\"{}\"\n{}\n```\n\n",
+                            ref_info.file_path.display(),
+                            ref_info.content
+                        ));
+                    }
+
+                    // 添加用户输入
+                    enhanced.push_str(&parsed_input);
+                    enhanced
+                } else {
+                    input.to_string()
+                };
+
                 // Add user message to context
-                self.context_manager.add_message(Message::user(input));
+                self.context_manager.add_message(Message::user(&enhanced_input));
 
                 // Start spinner
                 self.spinner.start("Thinking...");
@@ -126,7 +160,7 @@ impl OxideCli {
                 let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
                     AgentType::OpenAI(agent) => {
                         let mut stream = agent
-                            .stream_prompt(input)
+                            .stream_prompt(&enhanced_input)
                             .with_hook(hook.clone())
                             .multi_turn(20)
                             .with_history(self.context_manager.get_messages().to_vec())
@@ -137,7 +171,7 @@ impl OxideCli {
                     }
                     AgentType::Anthropic(agent) => {
                         let mut stream = agent
-                            .stream_prompt(input)
+                            .stream_prompt(&enhanced_input)
                             .with_hook(hook.clone())
                             .multi_turn(20)
                             .with_history(self.context_manager.get_messages().to_vec())
@@ -163,7 +197,7 @@ impl OxideCli {
 
                         // We can't easily get token usage from the stream response in rig currently without more complex handling,
                         // or if stream_to_stdout returns it.
-                        // rig 0.28 stream_to_stdout returns Result<StreamingResponse> which has a usage method? 
+                        // rig 0.28 stream_to_stdout returns Result<StreamingResponse> which has a usage method?
                         // Let's assume it works.
                          println!(
                             "{} Total tokens used: {}",
@@ -472,6 +506,10 @@ impl OxideCli {
         println!("  {}", "Basic Chat:".bright_yellow());
         println!("    {}", "Hello, how are you?".dimmed());
         println!();
+        println!("  {}", "File References:".bright_yellow());
+        println!("    {}", "@src/main.rs 请帮我重构这个文件".dimmed());
+        println!("    {}", "@Cargo.toml @README.md 比较这两个文件".dimmed());
+        println!();
         println!("  {}", "Session Management:".bright_yellow());
         println!("    {}", "/sessions".dimmed());
         println!("    {}", "/load abc123".dimmed());
@@ -494,7 +532,15 @@ impl OxideCli {
         );
         println!(
             "{}",
+            "📎 Use @file_path to reference files in your messages".bright_blue()
+        );
+        println!(
+            "{}",
             "⌨️  Press Tab after typing '/' to see available commands".bright_blue()
+        );
+        println!(
+            "{}",
+            "⌨️  Press Tab after typing '@' to see available files".bright_blue()
         );
         println!(
             "{}",

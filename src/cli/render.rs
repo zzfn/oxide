@@ -193,7 +193,7 @@ impl OxideCli {
         println!();
         println!(
             "{}",
-            "ctrl+c to exit, /help for commands, Tab for completion".dimmed()
+            "ctrl+c twice within 1s to exit, /help for commands, Tab for completion".dimmed()
         );
         println!();
         Ok(())
