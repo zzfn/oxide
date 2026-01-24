@@ -7,10 +7,11 @@ use ratatui::{
     Frame,
 };
 
+
 pub fn render(frame: &mut Frame, app: &App) {
     let size = frame.area();
 
-    // kota 风格的简洁布局
+    // 简洁风格布局
     let status_height = 1;
 
     // 如果显示帮助面板，覆盖整个屏幕
@@ -39,10 +40,15 @@ pub fn render(frame: &mut Frame, app: &App) {
     // 工具面板（如果需要）
     if app.show_tool_panel {
         render_tool_panel(frame, app, size);
+    render_status_bar(frame, app, main_chunks[4]);
+
+    // 工具面板（如果需要）
+    if app.show_tool_panel {
+        render_tool_panel(frame, app, size);
     }
 }
 
-/// 渲染分隔线（kota 风格）
+/// 渲染分隔线
 fn render_separator(frame: &mut Frame, area: Rect, theme: &crate::tui::Theme) {
     let separator = "-".repeat(area.width as usize);
     let line = Line::from(separator).style(theme.border_style());
@@ -336,7 +342,7 @@ fn render_input_box(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-/// kota 风格的简化消息渲染
+/// 简化风格消息渲染
 fn render_messages_simple(frame: &mut Frame, app: &App, area: Rect) {
     let mut all_lines = Vec::new();
 
@@ -410,10 +416,10 @@ fn render_messages_simple(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         let paragraph = Paragraph::new(all_lines).wrap(Wrap { trim: false });
         frame.render_widget(paragraph, area);
-    }
+    );
 }
 
-/// kota 风格的简化输入框
+/// 简化风格输入框
 fn render_input_simple(frame: &mut Frame, app: &App, area: Rect) {
     // 检查是否是命令，如果是则高亮显示
     let is_command = app.input.starts_with('/');

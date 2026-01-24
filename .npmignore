@@ -42,7 +42,8 @@ Thumbs.db
 
 # Tests
 tests/
+# Tests
+tests/
 *.rs.bk
 
 # Other projects
-kota/
