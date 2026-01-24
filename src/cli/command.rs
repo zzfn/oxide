@@ -227,11 +227,7 @@ impl OxideCli {
                         // rig 0.28 stream_to_stdout returns Result<StreamingResponse> which has a usage method?
                         // Let's assume it works.
                         self.add_session_tokens(resp.usage().total_tokens as u64);
-                        println!(
-                            "{} Total tokens used: {}",
-                            "📊".bright_blue(),
-                            resp.usage().total_tokens
-                        );
+                        self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
                     }
                     Err(e) => {
                         println!("{} Failed to get AI response: {}", "❌".red(), e);
@@ -1322,11 +1318,7 @@ impl OxideCli {
                 }
 
                 self.add_session_tokens(resp.usage().total_tokens as u64);
-                println!(
-                    "{} Total tokens used: {}",
-                    "📊".bright_blue(),
-                    resp.usage().total_tokens
-                );
+                self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
             }
             Err(e) => {
                 println!("{} Failed to get AI response: {}", "❌".red(), e);
@@ -1335,5 +1327,43 @@ impl OxideCli {
 
         println!();
         Ok(true)
+    }
+
+    /// 创建进度条字符串
+    fn create_progress_bar(percentage: f64, width: usize) -> String {
+        let filled = (percentage / 100.0 * width as f64).round() as usize;
+        let empty = width.saturating_sub(filled);
+        format!(
+            "{}{}",
+            "█".repeat(filled).bright_blue(),
+            "░".repeat(empty).dimmed()
+        )
+    }
+
+    /// 显示带动画的 token 统计（数字滚动 + 进度条）
+    async fn show_token_usage_animated(&self, total_tokens: u64) {
+        let max_display = 200000; // 假设 200k tokens 为满进度条
+        let percentage = (total_tokens as f64 / max_display as f64 * 100.0).min(100.0);
+        let progress_bar = Self::create_progress_bar(percentage, 20);
+
+        // 数字滚动动画
+        let steps = if total_tokens < 100 { 5 } else { 15 };
+        let delay_ms = if total_tokens < 100 { 30 } else { 20 };
+
+        for i in 0..=steps {
+            let current = (total_tokens as f64 * i as f64 / steps as f64).round() as u64;
+            print!(
+                "\r{} {} {} tokens",
+                progress_bar.clone(),
+                "Total tokens used:".bright_white(),
+                current.to_string().bright_green()
+            );
+            stdout().flush().unwrap();
+
+            if i < steps {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            }
+        }
+        println!();
     }
 }

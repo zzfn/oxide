@@ -1,10 +1,15 @@
 use super::FileToolError;
 use colored::*;
+use grep_regex::RegexMatcher;
+use grep_searcher::{
+    Searcher,
+    SearcherBuilder,
+    Sink,
+    SinkMatch,
+};
 use ignore::WalkBuilder;
-use regex::Regex;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
-use std::fs;
 
 #[derive(Deserialize)]
 pub struct GrepSearchArgs {
@@ -20,6 +25,28 @@ pub struct SearchMatch {
     pub line_content: String,
     pub match_start: usize,
     pub match_end: usize,
+}
+
+// 用于收集单个文件搜索结果的 sink
+struct FileCollector {
+    matches: Vec<(usize, String)>,
+    max_results: usize,
+}
+
+impl Sink for FileCollector {
+    type Error = std::io::Error;
+
+    fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch) -> Result<bool, Self::Error> {
+        if self.matches.len() >= self.max_results {
+            return Ok(false);
+        }
+
+        let line_content = String::from_utf8_lossy(mat.bytes()).to_string();
+        let line_number = mat.line_number().unwrap_or(1) as usize;
+
+        self.matches.push((line_number, line_content));
+        Ok(true)
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -62,44 +89,54 @@ impl Tool for GrepSearchTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let max_results = args.max_results.unwrap_or(100);
 
-        let regex = Regex::new(&args.query)
+        // 使用 ripgrep 的 RegexMatcher
+        let matcher = RegexMatcher::new(&args.query)
             .map_err(|e| FileToolError::InvalidInput(format!("Invalid regex: {}", e)))?;
 
-        let mut matches = Vec::new();
+        let mut all_matches = Vec::new();
         let mut files_searched = 0;
 
-        // Use ignore crate for smart file walking (respects .gitignore, etc.)
+        // 使用 ignore crate 遍历文件
         for result in WalkBuilder::new(&args.root_path)
-            .hidden(false) // Include hidden files
-            .git_ignore(true) // Respect .gitignore
+            .hidden(false)
+            .git_ignore(true)
             .build()
         {
-            if matches.len() >= max_results {
+            if all_matches.len() >= max_results {
                 break;
             }
 
             let entry = match result {
                 Ok(entry) => entry,
-                Err(_) => continue, // Skip entries we can't access
+                Err(_) => continue,
             };
 
             if entry.file_type().map_or(false, |ft| ft.is_file()) {
                 files_searched += 1;
 
-                if let Ok(content) = fs::read_to_string(entry.path()) {
-                    for (line_num, line) in content.lines().enumerate() {
-                        if let Some(mat) = regex.find(line) {
-                            matches.push(SearchMatch {
-                                file_path: entry.path().to_string_lossy().to_string(),
-                                line_number: line_num + 1,
-                                line_content: line.to_string(),
-                                match_start: mat.start(),
-                                match_end: mat.end(),
-                            });
+                // 为每个文件创建 collector
+                let remaining = max_results - all_matches.len();
+                let mut collector = FileCollector {
+                    matches: Vec::new(),
+                    max_results: remaining,
+                };
 
-                            if matches.len() >= max_results {
-                                break;
-                            }
+                // 使用 grep-searcher 搜索单个文件
+                let mut searcher = SearcherBuilder::new().build();
+                if searcher.search_path(&matcher, entry.path(), &mut collector).is_ok() {
+                    // 将结果转换为 SearchMatch
+                    for (line_num, line_content) in collector.matches {
+                        let content_len = line_content.len();
+                        all_matches.push(SearchMatch {
+                            file_path: entry.path().to_string_lossy().to_string(),
+                            line_number: line_num,
+                            line_content,
+                            match_start: 0,
+                            match_end: content_len,
+                        });
+
+                        if all_matches.len() >= max_results {
+                            break;
                         }
                     }
                 }
@@ -107,16 +144,17 @@ impl Tool for GrepSearchTool {
         }
 
         let message = format!(
-            "Found {} matches in {} files",
-            matches.len(),
+            "Found {} match{} in {} files",
+            all_matches.len(),
+            if all_matches.len() == 1 { "" } else { "es" },
             files_searched
         );
 
         Ok(GrepSearchOutput {
             root_path: args.root_path,
             query: args.query,
-            total_matches: matches.len(),
-            matches,
+            total_matches: all_matches.len(),
+            matches: all_matches,
             files_searched,
             success: true,
             message,

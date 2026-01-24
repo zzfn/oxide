@@ -23,6 +23,8 @@ regex = "1.0"
 similar = "2.7"
 walkdir = "2.0"
 ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 names = { version = "0.14.0", default-features = false }
 reedline = { version = "0.38", optional = true }
