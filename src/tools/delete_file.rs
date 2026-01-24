@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct DeleteFileArgs {
     pub file_path: String,
 }

@@ -12,6 +12,8 @@ pub enum FileToolError {
     NotAFile(String),
     #[error("Input is invalid: {0}")]
     InvalidInput(String),
+    #[error("Operation cancelled by user")]
+    Cancelled,
 }
 
 pub mod ask_user_question;

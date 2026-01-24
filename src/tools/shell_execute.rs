@@ -6,7 +6,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ShellExecuteArgs {
     pub command: String,
 }
