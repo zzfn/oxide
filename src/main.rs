@@ -5,6 +5,7 @@ mod hooks;
 mod skill;
 mod tools;
 mod task;
+mod token_counter;
 
 #[cfg(feature = "cli")]
 mod cli;

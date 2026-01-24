@@ -2,6 +2,7 @@ use crate::agent::{AgentType, NewAgentType, SubagentManager};
 use crate::context::SerializableMessage;
 use crate::hooks::SessionIdHook;
 use crate::skill::{SkillExecutor, SkillManager};
+use crate::token_counter::{count_tokens, count_messages_tokens, TokenUsage};
 use super::file_resolver::parse_file_references;
 use anyhow::Result;
 use colored::*;
@@ -148,6 +149,33 @@ impl OxideCli {
 
                 // Add user message to context
                 self.context_manager.add_message(Message::user(&enhanced_input));
+
+                // 计算 token 预估
+                let messages = self.context_manager.get_messages();
+                let input_tokens = count_messages_tokens(
+                    &messages.iter().map(|m| {
+                        let serializable = SerializableMessage::from(m);
+                        (serializable.role, serializable.content)
+                    }).collect::<Vec<_>>()
+                );
+
+                // 预估输出 tokens（通常是输入的 1.5-2 倍，这里保守估计）
+                let estimated_output = (input_tokens as f64 * 0.5).ceil() as usize;
+
+                let usage = TokenUsage::new(input_tokens, estimated_output);
+
+                // 显示 token 预估
+                println!();
+                println!(
+                    "{} {} | {} {} | {} {}",
+                    "📊".bright_blue(),
+                    format!("输入: {} tokens", usage.input_tokens).bright_white(),
+                    "预估输出".bright_yellow(),
+                    format!("~{} tokens", usage.output_tokens).bright_yellow(),
+                    "成本".bright_green(),
+                    format!("${:.6}", usage.estimated_cost()).bright_green()
+                );
+                println!();
 
                 // Start spinner
                 self.spinner.start("Thinking...");
@@ -1227,6 +1255,30 @@ impl OxideCli {
 
         // 将渲染后的提示词添加到上下文，作为用户消息
         self.context_manager.add_message(Message::user(&rendered_prompt));
+
+        // 计算 token 预估
+        let messages = self.context_manager.get_messages();
+        let input_tokens = count_messages_tokens(
+            &messages.iter().map(|m| {
+                let serializable = SerializableMessage::from(m);
+                (serializable.role, serializable.content)
+            }).collect::<Vec<_>>()
+        );
+
+        let estimated_output = (input_tokens as f64 * 0.5).ceil() as usize;
+        let usage = TokenUsage::new(input_tokens, estimated_output);
+
+        // 显示 token 预估
+        println!(
+            "{} {} | {} {} | {} {}",
+            "📊".bright_blue(),
+            format!("输入: {} tokens", usage.input_tokens).bright_white(),
+            "预估输出".bright_yellow(),
+            format!("~{} tokens", usage.output_tokens).bright_yellow(),
+            "成本".bright_green(),
+            format!("${:.6}", usage.estimated_cost()).bright_green()
+        );
+        println!();
 
         // 执行 AI 处理
         self.spinner.start("Thinking...");

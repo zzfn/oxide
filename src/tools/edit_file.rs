@@ -1,6 +1,6 @@
 use super::FileToolError;
 use colored::*;
-use patch_apply::{apply, Patch};
+use diffy::{apply, Patch};
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -77,16 +77,21 @@ impl Tool for EditFileTool {
             patch_str.to_string()
         };
 
-        // Parse the patch
-        let patch = Patch::from_single(&patch_str_normalized).map_err(|e| {
+        // Parse the patch using diffy
+        let patch = Patch::from_str(&patch_str_normalized).map_err(|e| {
             FileToolError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Failed to parse patch: {}", e),
             ))
         })?;
 
-        // Apply the patch using patch_apply::apply
-        let patched_content = apply(current_content, patch);
+        // Apply the patch using diffy::apply
+        let patched_content = apply(&current_content, &patch).map_err(|e| {
+            FileToolError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to apply patch: {}", e),
+            ))
+        })?;
 
         // Calculate statistics
         let original_lines: Vec<&str> = args.patch.lines().collect();
