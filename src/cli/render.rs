@@ -4,11 +4,35 @@ use futures::StreamExt;
 use rig::agent::{FinalResponse, MultiTurnStreamItem, StreamingResult};
 use rig::streaming::StreamedAssistantContent;
 use std::io::{stdout, Write};
+use std::sync::OnceLock;
 use std::time::Duration;
+use termimad::MadSkin;
 use tokio::sync::oneshot;
 use tokio::time::interval;
 
 use super::OxideCli;
+
+/// 全局 Markdown 渲染器（线程安全）
+static MAD_SKIN: OnceLock<MadSkin> = OnceLock::new();
+
+/// 获取配置好的 MadSkin
+fn get_mad_skin() -> &'static MadSkin {
+    MAD_SKIN.get_or_init(|| {
+        let mut skin = MadSkin::default();
+
+        // 自定义样式
+        skin.set_headers_fg(termimad::crossterm::style::Color::Cyan);
+        skin.bold.set_fg(termimad::crossterm::style::Color::White);
+        skin.italic.set_fg(termimad::crossterm::style::Color::Yellow);
+        skin.inline_code.set_fg(termimad::crossterm::style::Color::Green);
+
+        // 设置代码块样式（灰色背景）
+        skin.code_block.set_fg(termimad::crossterm::style::Color::AnsiValue(245));
+        skin.code_block.set_bg(termimad::crossterm::style::Color::AnsiValue(233));
+
+        skin
+    })
+}
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -64,8 +88,88 @@ impl Spinner {
     }
 }
 
+/// Markdown 流式渲染器
+struct MarkdownStreamRenderer {
+    buffer: String,
+    line_buffer: String,
+    in_code_block: bool,
+    in_list: bool,
+}
+
+impl MarkdownStreamRenderer {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_block: false,
+            in_list: false,
+        }
+    }
+
+    /// 处理流式文本并输出
+    fn process_text(&mut self, text: &str, skin: &MadSkin) {
+        for ch in text.chars() {
+            self.line_buffer.push(ch);
+
+            // 检测是否在代码块中
+            if self.line_buffer.contains("```") {
+                self.in_code_block = !self.in_code_block;
+                self.line_buffer.clear();
+                continue;
+            }
+
+            // 遇到换行符时处理整行
+            if ch == '\n' {
+                self.flush_line(skin);
+            }
+        }
+
+        // 将文本添加到缓冲区，用于最终渲染
+        self.buffer.push_str(text);
+    }
+
+    /// 刷新当前行到输出
+    fn flush_line(&mut self, skin: &MadSkin) {
+        let line = self.line_buffer.clone();
+
+        if self.in_code_block {
+            // 代码块内直接输出
+            print!("{}", line);
+        } else {
+            // 渲染 Markdown 格式
+            // 检测列表项
+            if line.trim_start().starts_with("- ") || line.trim_start().starts_with("* ") {
+                self.in_list = true;
+            } else if !line.trim().is_empty() && !line.trim_start().starts_with("    ") {
+                self.in_list = false;
+            }
+
+            // 使用 termimad 渲染行
+            let rendered = skin.inline(&line);
+            print!("{}", rendered);
+        }
+
+        self.line_buffer.clear();
+        stdout().flush().unwrap();
+    }
+
+    /// 完成流式输出，渲染完整格式
+    fn finish(self, skin: &MadSkin) {
+        // 刷新剩余内容
+        if !self.line_buffer.is_empty() {
+            let line = self.line_buffer;
+            let rendered = skin.inline(&line);
+            print!("{}", rendered);
+        }
+
+        // 输出额外的空行分隔
+        println!();
+    }
+}
+
 /// 自定义流式输出函数，替代 rig 的 stream_to_stdout
 /// 去掉 "Response:" 前缀，并在 "● oxide:" 后添加动画效果
+/// 支持实时 Markdown 渲染
 pub async fn stream_with_animation<R>(
     stream: &mut StreamingResult<R>,
 ) -> Result<FinalResponse, std::io::Error>
@@ -103,7 +207,8 @@ where
 
     // 等待第一个内容块
     let mut first_content = true;
-    let mut buffer = String::new();
+    let mut renderer = MarkdownStreamRenderer::new();
+    let skin = get_mad_skin();
 
     while let Some(content) = stream.next().await {
         match content {
@@ -121,9 +226,9 @@ where
                     }
                     first_content = false;
                 }
-                print!("{}", text.text);
-                buffer.push_str(&text.text);
-                stdout().flush().unwrap();
+
+                // 使用 Markdown 渲染器处理文本
+                renderer.process_text(&text.text, skin);
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::Reasoning(r),
@@ -139,7 +244,8 @@ where
                     first_content = false;
                 }
                 let reasoning = r.reasoning.join("\n");
-                print!("{}", reasoning);
+                // Reasoning 内容直接输出（通常不含 markdown）
+                print!("{}", reasoning.dimmed());
                 stdout().flush().unwrap();
             }
             Ok(MultiTurnStreamItem::FinalResponse(res)) => {
@@ -151,6 +257,9 @@ where
             _ => {}
         }
     }
+
+    // 完成渲染
+    renderer.finish(skin);
 
     // 如果流式输出结束还没有收到任何内容，停止 spinner
     if first_content {

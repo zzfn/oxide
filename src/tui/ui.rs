@@ -11,7 +11,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     let size = frame.area();
 
     // kota 风格的简洁布局
-    let help_height = 1;
+    let status_height = 1;
 
     // 如果显示帮助面板，覆盖整个屏幕
     if app.show_help {
@@ -26,7 +26,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Min(0),              // 消息区域（包含欢迎横幅）
             Constraint::Length(1),           // 分隔线
             Constraint::Length(1),           // 输入行
-            Constraint::Length(help_height), // 帮助栏
+            Constraint::Length(status_height), // 状态栏
         ])
         .split(size);
 
@@ -34,7 +34,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_messages_simple(frame, app, main_chunks[1]);
     render_separator(frame, main_chunks[2], &app.theme);
     render_input_simple(frame, app, main_chunks[3]);
-    render_help_bar(frame, app, main_chunks[4]);
+    render_status_bar(frame, app, main_chunks[4]);
 
     // 工具面板（如果需要）
     if app.show_tool_panel {

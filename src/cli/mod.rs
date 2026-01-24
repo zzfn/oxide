@@ -6,12 +6,15 @@ use anyhow::Result;
 use colored::*;
 use dialoguer::FuzzySelect;
 use reedline::{
-    default_emacs_keybindings, Completer, DefaultPrompt, DescriptionMode, EditCommand, Emacs,
-    IdeMenu, KeyCode, KeyModifiers, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal,
-    Span, Suggestion,
+    default_emacs_keybindings, Completer, DescriptionMode, EditCommand, Emacs, IdeMenu, KeyCode,
+    KeyModifiers, MenuBuilder, Prompt, PromptEditMode, Reedline, ReedlineEvent, ReedlineMenu,
+    Signal, Span, Suggestion,
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::context::ContextManager;
@@ -442,6 +445,96 @@ impl Completer for OxideCompleter {
     }
 }
 
+/// 自定义 Prompt，在右侧显示会话信息和 token 计数
+#[derive(Clone)]
+struct OxidePrompt {
+    /// 工作目录（左侧提示符）
+    working_dir: PathBuf,
+    /// Token 总数
+    total_tokens: Arc<AtomicU64>,
+    /// 会话 ID
+    session_id: String,
+    /// Agent 类型
+    agent_type: String,
+}
+
+impl OxidePrompt {
+    fn new(
+        working_dir: PathBuf,
+        total_tokens: Arc<AtomicU64>,
+        session_id: String,
+        agent_type: String,
+    ) -> Self {
+        Self {
+            working_dir,
+            total_tokens,
+            session_id,
+            agent_type,
+        }
+    }
+
+    /// 格式化 token 计数显示
+    fn format_tokens(&self) -> String {
+        let tokens = self.total_tokens.load(Ordering::Relaxed);
+        if tokens < 1000 {
+            format!("{} tokens", tokens)
+        } else if tokens < 1_000_000 {
+            format!("{:.1}k tokens", tokens as f64 / 1000.0)
+        } else {
+            format!("{:.2}M tokens", tokens as f64 / 1_000_000.0)
+        }
+    }
+
+    /// 获取简短的会话 ID（前 8 位）
+    fn short_session_id(&self) -> String {
+        if self.session_id.len() > 8 {
+            self.session_id[..8].to_string()
+        } else {
+            self.session_id.clone()
+        }
+    }
+}
+
+impl Prompt for OxidePrompt {
+    fn render_prompt_left(&self) -> Cow<'_, str> {
+        // 显示当前目录名称（完整路径太长）
+        let dir_name = self
+            .working_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("oxide");
+
+        Cow::Owned(format!("{}> ", dir_name))
+    }
+
+    fn render_prompt_right(&self) -> Cow<'_, str> {
+        let session_display = format!("[{}]", self.short_session_id());
+        let agent_display = format!("@{}", self.agent_type);
+        let tokens_display = self.format_tokens();
+
+        // 组合右侧提示信息：会话ID | Agent | Token计数
+        Cow::Owned(format!(
+            "{} | {} | {}",
+            session_display, agent_display, tokens_display
+        ))
+    }
+
+    fn render_prompt_indicator(&self, _prompt_mode: PromptEditMode) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+
+    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+
+    fn render_prompt_history_search_indicator(
+        &self,
+        _history_search: reedline::PromptHistorySearch,
+    ) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+}
+
 /// 触发符类型
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TriggerType {
@@ -494,6 +587,7 @@ pub struct OxideCli {
     pub agent: AgentType,
     pub context_manager: ContextManager,
     spinner: Spinner,
+    total_tokens: Arc<AtomicU64>,
 }
 
 impl OxideCli {
@@ -509,6 +603,7 @@ impl OxideCli {
             agent,
             context_manager,
             spinner: Spinner::new(),
+            total_tokens: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -673,10 +768,19 @@ impl OxideCli {
             .with_edit_mode(edit_mode)
             .with_completer(Box::new(OxideCompleter))
             .with_menu(ReedlineMenu::EngineCompleter(Box::new(completion_menu)));
-        let prompt = DefaultPrompt::default();
+
         let mut last_ctrl_c: Option<Instant> = None;
 
         loop {
+            // 每次循环重新创建 prompt 以获取最新的会话信息
+            let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let prompt = OxidePrompt::new(
+                working_dir,
+                self.total_tokens.clone(),
+                self.context_manager.session_id().to_string(),
+                self.agent.type_name().to_string(),
+            );
+
             self.print_separator()?;
             let readline = rl.read_line(&prompt);
             let final_input = match readline {
@@ -728,6 +832,14 @@ impl OxideCli {
     #[allow(dead_code)]
     pub fn session_id(&self) -> &str {
         self.context_manager.session_id()
+    }
+
+    fn reset_session_tokens(&self) {
+        self.total_tokens.store(0, Ordering::Relaxed);
+    }
+
+    fn add_session_tokens(&self, tokens: u64) {
+        self.total_tokens.fetch_add(tokens, Ordering::Relaxed);
     }
 }
 

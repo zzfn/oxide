@@ -199,7 +199,8 @@ impl OxideCli {
                         // or if stream_to_stdout returns it.
                         // rig 0.28 stream_to_stdout returns Result<StreamingResponse> which has a usage method?
                         // Let's assume it works.
-                         println!(
+                        self.add_session_tokens(resp.usage().total_tokens as u64);
+                        println!(
                             "{} Total tokens used: {}",
                             "📊".bright_blue(),
                             resp.usage().total_tokens
@@ -221,6 +222,7 @@ impl OxideCli {
 
     fn clear_context(&mut self) -> Result<()> {
         self.context_manager.clear();
+        self.reset_session_tokens();
         println!(
             "{} Context cleared. Current session: {}",
             "✅".bright_green(),
@@ -662,6 +664,7 @@ impl OxideCli {
 
         // Switch
         self.context_manager.switch_session(session_id.to_string());
+        self.reset_session_tokens();
 
         match self.context_manager.load() {
             Ok(true) => {
@@ -1267,6 +1270,7 @@ impl OxideCli {
                     println!("{} Failed to save context: {}", "⚠️".yellow(), e);
                 }
 
+                self.add_session_tokens(resp.usage().total_tokens as u64);
                 println!(
                     "{} Total tokens used: {}",
                     "📊".bright_blue(),
