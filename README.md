@@ -19,11 +19,11 @@ Oxide 是一个基于 Rust 的命令行 AI 助手，支持多种 LLM 提供商�
 ### 使用 npm 安装（推荐）
 
 ```bash
-# 全局安装（内网 registry）
-npm install -g oxide-cli --registry http://registry.npmjs.org/
+# 全局安装
+npm install -g oxide-cli
 
 # 或使用 npx（无需安装）
-npx oxide-cli --registry http://registry.npmjs.org/
+npx oxide-cli
 ```
 
 ### 从源代码编译
