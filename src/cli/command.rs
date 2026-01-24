@@ -1,6 +1,7 @@
 use crate::agent::{AgentType, NewAgentType, SubagentManager};
 use crate::context::SerializableMessage;
 use crate::hooks::SessionIdHook;
+use crate::skill::{SkillExecutor, SkillManager};
 use anyhow::Result;
 use colored::*;
 use rig::completion::Message;
@@ -90,7 +91,24 @@ impl OxideCli {
                 println!("{} Unknown /tasks subcommand", "❌".red());
                 println!("{} Usage: /tasks [list|show <id>|cancel <id>]", "💡".bright_blue());
             }
+            "/skills" | "/skills list" => {
+                self.list_skills()?;
+            }
+            _ if input.starts_with("/skills show ") => {
+                let skill_name = input.strip_prefix("/skills show ").unwrap_or("").trim();
+                self.show_skill(skill_name)?;
+            }
+            _ if input.starts_with("/skills ") => {
+                println!("{} Unknown /skills subcommand", "❌".red());
+                println!("{} Usage: /skills [list|show <name>]", "💡".bright_blue());
+            }
             _ if input.starts_with('/') => {
+                // 尝试作为 skill 执行
+                if self.try_execute_skill(input).await? {
+                    // 成功执行了 skill，跳过后续处理
+                    return Ok(true);
+                }
+
                 println!("{} Unknown command: {}", "❌".red(), input);
                 println!("{} Type /help for available commands", "💡".bright_blue());
             }
@@ -398,6 +416,7 @@ impl OxideCli {
         );
         println!("  {} - List or switch Agent types", "/agent [list|switch <type>|capabilities]".bright_green());
         println!("  {} - Manage background tasks", "/tasks [list|show <id>|cancel <id>]".bright_green());
+        println!("  {} - Manage and use skills", "/skills [list|show <name>]".bright_green());
         println!("  {} - Show this help message", "/help".bright_green());
         println!();
 
@@ -986,5 +1005,234 @@ impl OxideCli {
 
         println!();
         Ok(())
+    }
+
+    /// 列出所有可用的技能
+    fn list_skills(&self) -> Result<()> {
+        let manager = SkillManager::new()?;
+        let skills = manager.list_skills();
+
+        if skills.is_empty() {
+            println!("{}", "📚 No skills found".bright_yellow());
+            println!();
+            return Ok(());
+        }
+
+        println!("{}", "📚 Available Skills:".bright_cyan());
+        println!();
+
+        for skill in skills {
+            let source_icon = match skill.source {
+                crate::skill::SkillSource::BuiltIn => "🔧".bright_blue(),
+                crate::skill::SkillSource::Global => "🌐".bright_green(),
+                crate::skill::SkillSource::Local => "📁".bright_yellow(),
+            };
+
+            println!("  {} {} - {}", source_icon, format!("/{}", skill.name).bright_white(), skill.description.bright_black());
+
+            // 显示参数
+            if !skill.args.is_empty() {
+                println!("    {}", "Arguments:".bright_yellow());
+                for arg in &skill.args {
+                    let required = if arg.required {
+                        format!("{} required", "✓".bright_green())
+                    } else {
+                        "optional".dimmed().to_string()
+                    };
+                    println!("      -{} : {} ({})", arg.name.bright_white(), arg.description.bright_black(), required);
+                }
+            }
+            println!();
+        }
+
+        println!(
+            "{} Use '/skills show <name>' to view skill details",
+            "💡".bright_blue()
+        );
+        println!(
+            "{} Use /<skill-name> to execute a skill",
+            "💡".bright_blue()
+        );
+        println!();
+        Ok(())
+    }
+
+    /// 显示技能详细信息
+    fn show_skill(&self, skill_name: &str) -> Result<()> {
+        let manager = SkillManager::new()?;
+        let skill = match manager.get_skill(skill_name) {
+            Some(s) => s,
+            None => {
+                println!("{} Skill not found: {}", "❌".red(), skill_name);
+                println!(
+                    "{} Use '/skills list' to see available skills",
+                    "💡".bright_blue()
+                );
+                println!();
+                return Ok(());
+            }
+        };
+
+        println!("{}", "📖 Skill Details:".bright_cyan());
+        println!();
+        println!("  {} {}", "Name:".bright_yellow(), skill.name.bright_white());
+        println!(
+            "  {} {}",
+            "Description:".bright_yellow(),
+            skill.description.bright_white()
+        );
+
+        let source_str = match skill.source {
+            crate::skill::SkillSource::BuiltIn => "Built-in".bright_blue(),
+            crate::skill::SkillSource::Global => "Global".bright_green(),
+            crate::skill::SkillSource::Local => "Local".bright_yellow(),
+        };
+        println!("  {} {}", "Source:".bright_yellow(), source_str);
+
+        if !skill.args.is_empty() {
+            println!();
+            println!("  {}", "Arguments:".bright_yellow());
+            for arg in &skill.args {
+                let required = if arg.required {
+                    format!("{} required", "✓".bright_green())
+                } else {
+                    "optional".dimmed().to_string()
+                };
+                println!(
+                    "    -{} : {} ({})",
+                    arg.name.bright_white(),
+                    arg.description.bright_black(),
+                    required
+                );
+                if let Some(default) = &arg.default {
+                    println!("      Default: {}", default.dimmed());
+                }
+            }
+        }
+
+        println!();
+        println!("  {}", "Usage:".bright_yellow());
+        let args_str = skill
+            .args
+            .iter()
+            .map(|arg| {
+                if arg.required {
+                    format!("-{} <{}>", arg.name, arg.name)
+                } else {
+                    format!("[ -{} <{}> ]", arg.name, arg.name)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        println!("    /{} {}", skill.name.bright_white(), args_str.dimmed());
+        println!();
+        Ok(())
+    }
+
+    /// 尝试执行一个 skill
+    /// 返回 true 如果成功识别并执行了 skill，否则返回 false
+    async fn try_execute_skill(&mut self, input: &str) -> Result<bool> {
+        // 解析命令格式：/skillname [args...]
+        let parts: Vec<&str> = input.splitn(2, ' ').collect();
+        if parts.is_empty() {
+            return Ok(false);
+        }
+
+        let skill_name = parts[0].strip_prefix('/');
+        let skill_name = match skill_name {
+            Some(name) if !name.is_empty() => name,
+            _ => return Ok(false),
+        };
+
+        let args_str = parts.get(1).unwrap_or(&"");
+
+        // 获取 skill
+        let manager = SkillManager::new()?;
+        let skill = match manager.get_skill(skill_name) {
+            Some(s) => s,
+            None => return Ok(false), // 不是 skill，返回 false
+        };
+
+        // 执行 skill
+        let rendered_prompt = match SkillExecutor::execute(&skill, args_str) {
+            Ok(prompt) => prompt,
+            Err(e) => {
+                println!("{} Failed to execute skill: {}", "❌".red(), e);
+                println!();
+                return Ok(true); // 虽然执行失败，但确实是 skill 命令
+            }
+        };
+
+        // 显示执行的 skill 信息
+        let source_icon = match skill.source {
+            crate::skill::SkillSource::BuiltIn => "🔧".bright_blue(),
+            crate::skill::SkillSource::Global => "🌐".bright_green(),
+            crate::skill::SkillSource::Local => "📁".bright_yellow(),
+        };
+        println!(
+            "{} Executing skill: {}",
+            source_icon,
+            format!("/{}", skill.name).bright_cyan()
+        );
+        println!();
+
+        // 将渲染后的提示词添加到上下文，作为用户消息
+        self.context_manager.add_message(Message::user(&rendered_prompt));
+
+        // 执行 AI 处理
+        self.spinner.start("Thinking...");
+        stdout().flush().unwrap();
+
+        let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
+
+        let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
+            AgentType::OpenAI(agent) => {
+                let mut stream = agent
+                    .stream_prompt(&rendered_prompt)
+                    .with_hook(hook.clone())
+                    .multi_turn(20)
+                    .with_history(self.context_manager.get_messages().to_vec())
+                    .await;
+                self.spinner.stop();
+                super::render::stream_with_animation(&mut stream).await
+            }
+            AgentType::Anthropic(agent) => {
+                let mut stream = agent
+                    .stream_prompt(&rendered_prompt)
+                    .with_hook(hook.clone())
+                    .multi_turn(20)
+                    .with_history(self.context_manager.get_messages().to_vec())
+                    .await;
+                self.spinner.stop();
+                super::render::stream_with_animation(&mut stream).await
+            }
+        };
+
+        println!();
+
+        match response_result {
+            Ok(resp) => {
+                let response_content = resp.response();
+                self.context_manager
+                    .add_message(Message::assistant(response_content));
+
+                if let Err(e) = self.context_manager.save() {
+                    println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                }
+
+                println!(
+                    "{} Total tokens used: {}",
+                    "📊".bright_blue(),
+                    resp.usage().total_tokens
+                );
+            }
+            Err(e) => {
+                println!("{} Failed to get AI response: {}", "❌".red(), e);
+            }
+        }
+
+        println!();
+        Ok(true)
     }
 }

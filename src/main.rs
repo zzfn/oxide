@@ -2,6 +2,7 @@ mod agent;
 mod config;
 mod context;
 mod hooks;
+mod skill;
 mod tools;
 mod task;
 
@@ -17,6 +18,7 @@ use config::Config;
 use crate::agent::AgentBuilder;
 use crate::cli::OxideCli;
 use crate::context::ContextManager;
+use crate::skill::SkillManager;
 use names::Generator;
 
 #[tokio::main]
@@ -51,14 +53,18 @@ async fn main() -> Result<()> {
         let storage_dir = std::path::PathBuf::from(".oxide/sessions");
         let context_manager = ContextManager::new(storage_dir, session_id)?;
 
+        // Initialize SkillManager
+        let skill_manager = SkillManager::new()?;
+        skill_manager.init()?;
+
         // Initialize and run CLI
         let mut cli = OxideCli::new(
             config.auth_token,
             config.model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
             agent,
-            context_manager
+            context_manager,
         );
-        
+
         cli.run().await?;
     }
 

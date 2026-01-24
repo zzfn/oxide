@@ -76,6 +76,14 @@ impl Default for OxideHelper {
             "/agent".to_string(),
             CommandInfo::new("/agent [list|switch <type>]", "管理 Agent 类型"),
         );
+        commands.insert(
+            "/tasks".to_string(),
+            CommandInfo::new("/tasks [list|show <id>]", "管理后台任务"),
+        );
+        commands.insert(
+            "/skills".to_string(),
+            CommandInfo::new("/skills [list|show <name>]", "管理技能"),
+        );
 
         Self {
             completer: FilenameCompleter::new(),
@@ -100,6 +108,7 @@ impl Completer for OxideHelper {
             let input = &line[..pos];
             let mut matches = Vec::new();
 
+            // 添加内置命令
             for (cmd_name, cmd_info) in &self.commands {
                 // 如果输入为空或者是 "/" 的子串，显示所有命令
                 // 否则只显示匹配的命令
@@ -109,6 +118,20 @@ impl Completer for OxideHelper {
                         display: format!("{} - {}", cmd_name, cmd_info.description),
                         replacement: cmd_name.clone(),
                     });
+                }
+            }
+
+            // 添加动态技能
+            if let Ok(skill_manager) = crate::skill::SkillManager::new() {
+                for skill in skill_manager.list_skills() {
+                    let cmd = format!("/{}", skill.name);
+                    // 如果输入匹配这个技能命令
+                    if input.is_empty() || input == "/" || cmd.starts_with(input) {
+                        matches.push(Pair {
+                            display: format!("{} - {}", cmd, skill.description),
+                            replacement: cmd,
+                        });
+                    }
                 }
             }
 
@@ -333,6 +356,14 @@ impl OxideCli {
             .iter()
             .map(|(name, info)| format!("{} - {}", name, info.description))
             .collect();
+
+        // 添加技能到命令列表
+        if let Ok(skill_manager) = crate::skill::SkillManager::new() {
+            for skill in skill_manager.list_skills() {
+                let cmd = format!("/{}", skill.name);
+                command_items.push(format!("{} - {}", cmd, skill.description));
+            }
+        }
 
         // 按命令名称排序
         command_items.sort();

@@ -12,6 +12,7 @@ Oxide 是一个基于 Rust 的命令行 AI 助手，支持多种 LLM 提供商�
 - 🔍 正则表达式搜索和代码库扫描
 - ⚙️ 灵活的配置管理（支持多个 API 端点和模型）
 - 💬 多轮对话历史管理
+- 🔧 **Skill 系统** - 可重用的自定义命令模板
 
 ## 安装
 
@@ -92,13 +93,17 @@ cargo run
 
 | 命令 | 说明 |
 |------|------|
-| `/help` 或 `/?` | 显示帮助信息 |
+| `/help` | 显示帮助信息 |
 | `/clear` | 清空当前对话 |
 | `/config` | 显示当前配置 |
 | `/history` | 显示当前会话的历史消息 |
-| `/list` | 列出所有保存的会话 |
+| `/sessions` | 列出所有保存的会话 |
 | `/load <id>` | 加载指定的会话 |
-| `/delete` | 删除当前会话 |
+| `/delete <id>` | 删除指定会话 |
+| `/agent [list|switch <type>]` | 管理或切换 Agent 类型 |
+| `/tasks [list|show <id>]` | 管理后台任务 |
+| `/skills [list|show <name>]` | 管理和使用技能 |
+| `/<skill-name>` | 执行指定的技能 |
 | `/exit` 或 `/quit` | 退出程序 |
 
 ### 对话示例
@@ -157,6 +162,91 @@ patch: --- a/main.rs
 query: fn main
 root_path: .
 找到 5 个匹配项在 3 个文件中
+```
+
+## Skill 系统
+
+Skill 系统允许你创建可重用的自定义命令模板，避免重复输入相同的提示词。
+
+### 内置技能
+
+Oxide 提供了一些常用的内置技能：
+
+- `/commit` - 创建符合 Conventional Commits 规范的 git commit
+- `/compact` - 压缩当前会话，创建摘要
+- `/review` - 审查代码并提供反馈
+
+### 使用技能
+
+```bash
+# 列出所有可用技能
+/skills list
+
+# 查看技能详情
+/skills show commit
+
+# 执行技能（带参数）
+/commit -m "feat: add new feature"
+```
+
+### 创建自定义技能
+
+你可以创建自己的技能文件，存放在以下位置（按优先级排序）：
+
+1. `.oxide/skills/` - 项目本地技能（最高优先级）
+2. `~/.oxide/skills/` - 全局技能
+
+技能文件格式（Markdown + Front Matter）：
+
+```markdown
+---
+name: my-skill
+description: My custom skill description
+args:
+  - name: param1
+    description: First parameter
+    required: true
+  - name: param2
+    description: Second parameter
+    required: false
+---
+
+Your skill template goes here.
+Use {{param1}} and {{param2}} as placeholders.
+
+The user provided: {{param1}} and {{param2}}
+```
+
+### 技能示例
+
+**创建代码审查技能：**
+
+```bash
+# 创建 .oxide/skills/code-review.md
+cat > .oxide/skills/code-review.md << 'EOF'
+---
+name: code-review
+description: Perform a thorough code review
+args:
+  - name: file
+    description: File path to review
+    required: true
+---
+
+Please review the code in {{file}} focusing on:
+1. Code quality and style
+2. Potential bugs
+3. Performance issues
+4. Security concerns
+
+Provide specific, actionable feedback.
+EOF
+```
+
+**使用自定义技能：**
+
+```bash
+/code-review -file "src/main.rs"
 ```
 
 ## 会话管理
