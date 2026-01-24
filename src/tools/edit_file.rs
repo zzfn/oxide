@@ -3,6 +3,7 @@ use colored::*;
 use diffy::{apply, Patch};
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
+use similar::{TextDiff};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -15,6 +16,30 @@ fn preview_enabled() -> bool {
         .unwrap_or_else(|_| "true".to_string())
         .parse::<bool>()
         .unwrap_or(true)
+}
+
+/// 渲染带颜色的 diff
+fn render_colored_diff(original: &str, modified: &str) {
+    let diff = TextDiff::from_lines(original, modified);
+
+    for ops in diff.grouped_ops(3) {
+        for op in ops {
+            for change in diff.iter_changes(&op) {
+                match change.tag() {
+                    similar::ChangeTag::Equal => {
+                        print!(" {}", change.value().dimmed());
+                    }
+                    similar::ChangeTag::Delete => {
+                        print!("{}{}", "-".red(), change.value().red());
+                    }
+                    similar::ChangeTag::Insert => {
+                        print!("{}{}", "+".green(), change.value().green());
+                    }
+                }
+            }
+        }
+    }
+    println!();
 }
 
 /// 请求用户确认
@@ -72,7 +97,7 @@ impl Tool for EditFileTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "edit_file".to_string(),
-            description: "Apply a unified diff patch to a file. This is efficient for making small, targeted changes to existing files without rewriting the entire content.".to_string(),
+            description: "Apply a unified diff patch to a file. This is efficient for making small, targeted changes to existing files without rewriting the entire content.\n\nIMPORTANT: The patch must be in valid unified diff format:\n\n```diff\n--- a/path/to/file.txt\n+++ b/path/to/file.txt\n@@ -line_number,count +line_number,count @@\n context_line1\n-old_line_to_remove\n+new_line_to_add\n context_line2\n```\n\nRules:\n1. Include both --- and +++ headers with file paths\n2. Hunk header @@ must include correct line numbers and counts\n3. Include 3 lines of context before and after changes\n4. Lines to remove start with '-'\n5. Lines to add start with '+'\n6. Context lines start with ' '\n\nExample patch:\n```diff\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -5,3 +5,4 @@\n fn main() {\n     let x = 5;\n-    println!(\"Old\");\n+    println!(\"New\");\n }\n```".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -82,7 +107,7 @@ impl Tool for EditFileTool {
                     },
                     "patch": {
                         "type": "string",
-                        "description": "A unified diff patch string in standard format."
+                        "description": "A complete unified diff patch with proper headers and hunks. Must include ---/+++ headers and @@ hunk headers with correct line numbers."
                     }
                 },
                 "required": ["file_path", "patch"]
@@ -264,14 +289,12 @@ impl Tool for WrappedEditFileTool {
         if preview_enabled() {
             // 生成预览
             match self.inner.preview_patch(&args).await {
-                Ok((_current_content, patched_content, lines_added, lines_removed, preview)) => {
+                Ok((current_content, patched_content, lines_added, lines_removed, preview)) => {
                     // 显示预览
                     println!();
                     println!("{}", "📋 即将应用以下修改:".bright_cyan().bold());
                     println!();
-                    println!("{}", "--- 原始".bright_black());
-                    println!("{}", "+++ 修改后".bright_black());
-                    println!("{}", preview.bright_white());
+                    render_colored_diff(&current_content, &patched_content);
                     println!();
 
                     // 请求用户确认
