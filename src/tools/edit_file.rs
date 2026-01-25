@@ -8,7 +8,6 @@ use similar::{TextDiff};
 use std::borrow::Cow;
 use std::env;
 use std::fs;
-use std::io;
 use std::path::Path;
 
 /// 检查是否启用预览模式
@@ -401,101 +400,26 @@ impl Tool for EditFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let file_path = &args.file_path;
-        let patch_str = &args.patch;
-        let path = Path::new(file_path);
-
-        // Check if file exists
-        if !path.exists() {
-            return Err(FileToolError::FileNotFound(file_path.clone()));
-        }
-
-        // Check if it's actually a file (not a directory)
-        if !path.is_file() {
-            return Err(FileToolError::NotAFile(file_path.clone()));
-        }
-
-        // Read the current file content
-        let current_content = fs::read_to_string(file_path)?;
-
-        // Ensure patch_str ends with a newline
-        let patch_str_normalized = if !patch_str.ends_with('\n') {
-            format!("{}\n", patch_str)
-        } else {
-            patch_str.to_string()
-        };
-
-        // Parse the patch using diffy (with repair for bad hunk counts)
-        let patch_str_used = normalize_patch_for_parse(&patch_str_normalized)?;
-        let patch = Patch::from_str(patch_str_used.as_ref())
-            .map_err(|e| build_parse_error(e, patch_str_used.as_ref()))?;
-
-        // Apply the patch using diffy::apply
-        let patched_content = apply(&current_content, &patch).map_err(|e| {
-            // 计算文件行数用于诊断
-            let file_lines: Vec<&str> = current_content.lines().collect();
-            let total_lines = file_lines.len();
-
-            let error_msg = format!(
-                "Failed to apply patch: {}\n\n\
-                 ═══════════════════════════════════════════════════════════\n\
-                 ❌ Patch 应用失败 - 诊断信息:\n\
-                 ═══════════════════════════════════════════════════════════\n\
-                 \n\
-                 文件信息:\n\
-                 - 文件: {}\n\
-                 - 总行数: {}\n\
-                 \n\
-                 常见原因:\n\
-                 1. ❌ Hunk header 中的行号超出文件范围\n\
-                 2. ❌ 上下文内容与文件实际内容不匹配\n\
-                 3. ❌ 文件内容在生成 patch 后已被修改\n\
-                 4. ❌ 缩进或空格不匹配\n\
-                 \n\
-                 💡 建议:\n\
-                 - 使用 Read 工具重新读取文件，确认当前内容\n\
-                 - 检查 patch 中的上下文行是否与文件完全一致\n\
-                 - 确认 hunk header 的行号在有效范围内 (1-{})\n\
-                 - 如果文件最近被修改过，需要重新生成 patch",
-                e, file_path, total_lines, total_lines
-            );
-
-            FileToolError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                error_msg,
-            ))
-        })?;
-
-        // Calculate statistics
-        let original_lines: Vec<&str> = patch_str_used.as_ref().lines().collect();
-        let mut lines_added = 0usize;
-        let mut lines_removed = 0usize;
-
-        for line in original_lines {
-            if line.starts_with('+') && !line.starts_with("+++") {
-                lines_added += 1;
-            } else if line.starts_with('-') && !line.starts_with("---") {
-                lines_removed += 1;
-            }
-        }
+        let (_current_content, patched_content, lines_added, lines_removed) =
+            Self::apply_patch_internal(&args.file_path, &args.patch)?;
 
         // Write the modified content back to the file
-        match fs::write(file_path, &patched_content) {
+        match fs::write(&args.file_path, &patched_content) {
             Ok(()) => Ok(EditFileOutput {
-                file_path: file_path.clone(),
+                file_path: args.file_path.clone(),
                 lines_added,
                 lines_removed,
                 success: true,
                 message: format!(
                     "Successfully applied patch to '{}': +{} lines, -{} lines",
-                    file_path, lines_added, lines_removed
+                    args.file_path, lines_added, lines_removed
                 ),
                 preview: None,
                 cancelled: false,
             }),
             Err(e) => match e.kind() {
                 std::io::ErrorKind::PermissionDenied => {
-                    Err(FileToolError::PermissionDenied(file_path.clone()))
+                    Err(FileToolError::PermissionDenied(args.file_path.clone()))
                 }
                 _ => Err(FileToolError::Io(e)),
             },
@@ -504,21 +428,22 @@ impl Tool for EditFileTool {
 }
 
 impl EditFileTool {
-    /// 预览补丁（不实际应用）
-    /// 返回 (原始内容, 修改后内容, 新增行数, 删除行数, 补丁字符串)
-    pub async fn preview_patch(&self, args: &EditFileArgs) -> Result<(String, String, usize, usize, String), FileToolError> {
-        let file_path = &args.file_path;
-        let patch_str = &args.patch;
+    /// 内部方法：应用补丁并返回所有中间结果
+    /// 返回 (原始内容, 修改后内容, 新增行数, 删除行数)
+    fn apply_patch_internal(
+        file_path: &str,
+        patch_str: &str,
+    ) -> Result<(String, String, usize, usize), FileToolError> {
         let path = Path::new(file_path);
 
         // Check if file exists
         if !path.exists() {
-            return Err(FileToolError::FileNotFound(file_path.clone()));
+            return Err(FileToolError::FileNotFound(file_path.to_string()));
         }
 
         // Check if it's actually a file (not a directory)
         if !path.is_file() {
-            return Err(FileToolError::NotAFile(file_path.clone()));
+            return Err(FileToolError::NotAFile(file_path.to_string()));
         }
 
         // Read the current file content
@@ -526,9 +451,9 @@ impl EditFileTool {
 
         // Ensure patch_str ends with a newline
         let patch_str_normalized = if !patch_str.ends_with('\n') {
-            format!("{}\n", patch_str)
+            Cow::Owned(format!("{}\n", patch_str))
         } else {
-            patch_str.to_string()
+            Cow::Borrowed(patch_str)
         };
 
         // Parse the patch using diffy (with repair for bad hunk counts)
@@ -585,8 +510,21 @@ impl EditFileTool {
             }
         }
 
-        // 使用原始补丁字符串作为预览
-        let preview = patch_str_used.into_owned();
+        Ok((current_content, patched_content, lines_added, lines_removed))
+    }
+
+    /// 预览补丁（不实际应用）
+    /// 返回 (原始内容, 修改后内容, 新增行数, 删除行数, 补丁字符串)
+    pub async fn preview_patch(&self, args: &EditFileArgs) -> Result<(String, String, usize, usize, String), FileToolError> {
+        let (current_content, patched_content, lines_added, lines_removed) =
+            Self::apply_patch_internal(&args.file_path, &args.patch)?;
+
+        // 重新生成补丁字符串用于预览（标准化后的版本）
+        let preview = if args.patch.ends_with('\n') {
+            args.patch.clone()
+        } else {
+            format!("{}\n", args.patch)
+        };
 
         Ok((current_content, patched_content, lines_added, lines_removed, preview))
     }
