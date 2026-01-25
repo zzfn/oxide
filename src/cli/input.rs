@@ -6,7 +6,7 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
-use dialoguer::Select;
+use inquire::Select;
 use std::collections::HashMap;
 use std::io::{self, Write};
 
@@ -255,14 +255,10 @@ impl InstantInput {
         terminal::disable_raw_mode()?;
 
         // 显示选择器
-        let selection = Select::new()
-            .with_prompt("请选择命令")
-            .items(&command_items)
-            .default(0)
-            .interact()?;
+        let selection = Select::new("请选择命令", command_items.clone()).prompt()?;
 
         // 提取命令名称（去除描述部分）
-        let selected = command_items[selection]
+        let selected = selection
             .split(" - ")
             .next()
             .unwrap_or("/")

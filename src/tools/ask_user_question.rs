@@ -6,7 +6,7 @@
 
 use super::FileToolError;
 use colored::*;
-use dialoguer::{MultiSelect, Select};
+use inquire::{InquireError, MultiSelect, Select};
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -182,16 +182,14 @@ impl AskUserQuestionTool {
             .collect();
 
         if question.multi_select {
-            let selection = MultiSelect::new()
-                .with_prompt("使用上下键选择，空格勾选，回车确认")
-                .items(&display_items)
-                .interact_opt();
+            let selection = MultiSelect::new("使用上下键选择，空格勾选，回车确认", display_items)
+                .prompt();
 
             match selection {
-                Ok(Some(indices)) => {
-                    let selected_labels: Vec<String> = indices
+                Ok(items) => {
+                    let selected_labels: Vec<String> = items
                         .iter()
-                        .filter_map(|&i| question.options.get(i).map(|o| o.label.clone()))
+                        .filter_map(|item| item.split(" - ").next().map(|s| s.to_string()))
                         .collect();
 
                     Ok(Answer {
@@ -200,31 +198,32 @@ impl AskUserQuestionTool {
                         has_answer: !selected_labels.is_empty(),
                     })
                 }
-                Ok(None) => Ok(Answer {
-                    question_header: question.header.clone(),
-                    selected: serde_json::json!(null),
-                    has_answer: false,
-                }),
+                Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+                    Ok(Answer {
+                        question_header: question.header.clone(),
+                        selected: serde_json::json!(null),
+                        has_answer: false,
+                    })
+                }
                 Err(_) => Self::ask_question_manual_input(question),
             }
         } else {
-            let selection = Select::new()
-                .with_prompt("使用上下键选择，然后回车确认")
-                .items(&display_items)
-                .default(0)
-                .interact_opt();
+            let selection =
+                Select::new("使用上下键选择，然后回车确认", display_items).prompt();
 
             match selection {
-                Ok(Some(index)) => Ok(Answer {
+                Ok(item) => Ok(Answer {
                     question_header: question.header.clone(),
-                    selected: serde_json::json!(question.options[index].label.clone()),
+                    selected: serde_json::json!(item.split(" - ").next().unwrap_or("").to_string()),
                     has_answer: true,
                 }),
-                Ok(None) => Ok(Answer {
-                    question_header: question.header.clone(),
-                    selected: serde_json::json!(null),
-                    has_answer: false,
-                }),
+                Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+                    Ok(Answer {
+                        question_header: question.header.clone(),
+                        selected: serde_json::json!(null),
+                        has_answer: false,
+                    })
+                }
                 Err(_) => Self::ask_question_manual_input(question),
             }
         }

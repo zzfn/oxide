@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["cli"]
-cli = ["reedline", "colored", "dialoguer", "termimad", "crossterm"]
+cli = ["reedline", "colored", "inquire", "termimad", "crossterm"]
 
 [dependencies]
 tokio = { version = "1.40", features = ["full"] }
@@ -29,7 +29,7 @@ chrono = { version = "0.4", features = ["serde"] }
 names = { version = "0.14.0", default-features = false }
 reedline = { version = "0.38", optional = true }
 colored = { version = "3.0", optional = true }
-dialoguer = { version = "0.11", optional = true, features = ["fuzzy-select"] }
+inquire = { version = "0.7", optional = true, features = ["fuzzy"] }
 termimad = { version = "0.30", optional = true }
 crossterm = { version = "0.29", optional = true }
 rig-core = "0.28.0"

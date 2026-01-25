@@ -4,7 +4,7 @@ pub mod render;
 
 use anyhow::Result;
 use colored::*;
-use dialoguer::FuzzySelect;
+use inquire::Select;
 use reedline::{
     default_emacs_keybindings, Completer, DescriptionMode, EditCommand, Emacs, IdeMenu, KeyCode,
     KeyModifiers, MenuBuilder, Prompt, PromptEditMode, Reedline, ReedlineEvent, ReedlineMenu,
@@ -626,15 +626,10 @@ impl OxideCli {
         // 按命令名称排序
         command_items.sort();
 
-        // 使用 FuzzySelect 支持模糊搜索
-        let selection = FuzzySelect::new()
-            .with_prompt("选择命令 (输入过滤)")
-            .items(&command_items)
-            .default(0)
-            .interact()?;
+        let selection = Select::new("选择命令 (输入过滤)", command_items).prompt()?;
 
         // 提取命令名称（去除描述部分）
-        let selected = command_items[selection]
+        let selected = selection
             .split(" - ")
             .next()
             .unwrap_or("/")
@@ -654,13 +649,9 @@ impl OxideCli {
             "@docs - 搜索文档",
         ];
 
-        let selection = FuzzySelect::new()
-            .with_prompt("选择上下文 (输入过滤)")
-            .items(&context_items)
-            .default(0)
-            .interact()?;
+        let selection = Select::new("选择上下文 (输入过滤)", context_items).prompt()?;
 
-        let selected = context_items[selection]
+        let selected = selection
             .split(" - ")
             .next()
             .unwrap_or("@")
@@ -680,13 +671,9 @@ impl OxideCli {
             "#docs - 文档",
         ];
 
-        let selection = FuzzySelect::new()
-            .with_prompt("选择标签 (输入过滤)")
-            .items(&tag_items)
-            .default(0)
-            .interact()?;
+        let selection = Select::new("选择标签 (输入过滤)", tag_items).prompt()?;
 
-        let selected = tag_items[selection]
+        let selected = selection
             .split(" - ")
             .next()
             .unwrap_or("#")
