@@ -6,6 +6,7 @@
 
 use super::FileToolError;
 use colored::*;
+use dialoguer::{MultiSelect, Select};
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -81,7 +82,78 @@ pub struct AskUserQuestionOutput {
 #[derive(Deserialize, Serialize)]
 pub struct AskUserQuestionTool;
 
+pub fn ask_question_interactive(question: &Question) -> Result<Answer, FileToolError> {
+    AskUserQuestionTool::ask_question(question)
+}
+
 impl AskUserQuestionTool {
+    fn ask_question_manual_input(question: &Question) -> Result<Answer, FileToolError> {
+        let prompt = if question.multi_select {
+            format!(
+                "{} (多个选项用逗号分隔, 例如: 1,3): ",
+                "选择".bright_green()
+            )
+        } else {
+            format!("{} (输入数字): ", "选择".bright_green())
+        };
+
+        print!("{}", prompt);
+        io::stdout().flush().map_err(|e| FileToolError::Io(e))?;
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| FileToolError::Io(e))?;
+
+        let input = input.trim();
+
+        if input.is_empty() {
+            return Ok(Answer {
+                question_header: question.header.clone(),
+                selected: serde_json::json!(null),
+                has_answer: false,
+            });
+        }
+
+        if question.multi_select {
+            let selected_indices: Vec<usize> = input
+                .split(',')
+                .map(|s| s.trim().parse::<usize>().unwrap_or(0))
+                .filter(|&i| i >= 1 && i <= question.options.len())
+                .map(|i| i - 1)
+                .collect();
+
+            let selected_labels: Vec<String> = selected_indices
+                .iter()
+                .filter_map(|&i| question.options.get(i).map(|o| o.label.clone()))
+                .collect();
+
+            Ok(Answer {
+                question_header: question.header.clone(),
+                selected: serde_json::json!(selected_labels),
+                has_answer: !selected_labels.is_empty(),
+            })
+        } else {
+            match input.trim().parse::<usize>() {
+                Ok(choice) if choice >= 1 && choice <= question.options.len() => {
+                    let index = choice - 1;
+                    let selected_label = &question.options[index].label;
+
+                    Ok(Answer {
+                        question_header: question.header.clone(),
+                        selected: serde_json::json!(selected_label),
+                        has_answer: true,
+                    })
+                }
+                _ => Ok(Answer {
+                    question_header: question.header.clone(),
+                    selected: serde_json::json!(null),
+                    has_answer: false,
+                }),
+            }
+        }
+    }
+
     /// 显示单个问题并收集答案 (CLI 模式)
     #[allow(dead_code)]
     fn ask_question_cli(question: &Question) -> Result<Answer, FileToolError> {
@@ -103,73 +175,57 @@ impl AskUserQuestionTool {
         }
         println!();
 
-        // 读取用户输入
-        let prompt = if question.multi_select {
-            format!(
-                "{} (多个选项用逗号分隔, 例如: 1,3): ",
-                "选择".bright_green()
-            )
-        } else {
-            format!("{} (输入数字): ", "选择".bright_green())
-        };
+        let display_items: Vec<String> = question
+            .options
+            .iter()
+            .map(|opt| format!("{} - {}", opt.label, opt.description))
+            .collect();
 
-        print!("{}", prompt);
-        io::stdout().flush().map_err(|e| FileToolError::Io(e))?;
-
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| FileToolError::Io(e))?;
-
-        let input = input.trim();
-
-        if input.is_empty() {
-            // 用户没有输入,返回空答案
-            return Ok(Answer {
-                question_header: question.header.clone(),
-                selected: serde_json::json!(null),
-                has_answer: false,
-            });
-        }
-
-        // 解析用户输入
         if question.multi_select {
-            // 多选: 解析逗号分隔的数字
-            let selected_indices: Vec<usize> = input
-                .split(',')
-                .map(|s| s.trim().parse::<usize>().unwrap_or(0))
-                .filter(|&i| i >= 1 && i <= question.options.len())
-                .map(|i| i - 1) // 转换为 0-based 索引
-                .collect();
+            let selection = MultiSelect::new()
+                .with_prompt("使用上下键选择，空格勾选，回车确认")
+                .items(&display_items)
+                .interact_opt();
 
-            let selected_labels: Vec<String> = selected_indices
-                .iter()
-                .filter_map(|&i| question.options.get(i).map(|o| o.label.clone()))
-                .collect();
-
-            Ok(Answer {
-                question_header: question.header.clone(),
-                selected: serde_json::json!(selected_labels),
-                has_answer: !selected_labels.is_empty(),
-            })
-        } else {
-            // 单选: 解析单个数字
-            match input.trim().parse::<usize>() {
-                Ok(choice) if choice >= 1 && choice <= question.options.len() => {
-                    let index = choice - 1;
-                    let selected_label = &question.options[index].label;
+            match selection {
+                Ok(Some(indices)) => {
+                    let selected_labels: Vec<String> = indices
+                        .iter()
+                        .filter_map(|&i| question.options.get(i).map(|o| o.label.clone()))
+                        .collect();
 
                     Ok(Answer {
                         question_header: question.header.clone(),
-                        selected: serde_json::json!(selected_label),
-                        has_answer: true,
+                        selected: serde_json::json!(selected_labels),
+                        has_answer: !selected_labels.is_empty(),
                     })
                 }
-                _ => Ok(Answer {
+                Ok(None) => Ok(Answer {
                     question_header: question.header.clone(),
                     selected: serde_json::json!(null),
                     has_answer: false,
                 }),
+                Err(_) => Self::ask_question_manual_input(question),
+            }
+        } else {
+            let selection = Select::new()
+                .with_prompt("使用上下键选择，然后回车确认")
+                .items(&display_items)
+                .default(0)
+                .interact_opt();
+
+            match selection {
+                Ok(Some(index)) => Ok(Answer {
+                    question_header: question.header.clone(),
+                    selected: serde_json::json!(question.options[index].label.clone()),
+                    has_answer: true,
+                }),
+                Ok(None) => Ok(Answer {
+                    question_header: question.header.clone(),
+                    selected: serde_json::json!(null),
+                    has_answer: false,
+                }),
+                Err(_) => Self::ask_question_manual_input(question),
             }
         }
     }

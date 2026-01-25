@@ -19,232 +19,6 @@
 
 ## 🎯 快速开始
 
-### 安装
-
-```bash
-# 通过 Cargo 安装
-cargo install oxide
-
-# 或从源码构建
-git clone https://github.com/yourusername/oxide.git
-cd oxide
-cargo build --release
-```
-
-### 基础使用
-
-```bash
-# 启动交互式会话
-oxide
-
-# 直接执行命令
-oxide "扫描当前目录的所有 Rust 文件"
-```
-
-## 📖 核心功能
-
-### 1. 🧠 智能对话系统
-
-通过自然语言与 AI 助手交互：
-
-```bash
-oxide "帮我分析 src 目录的代码结构"
-oxide "找出所有 TODO 注释"
-oxide "重构这个函数，让它更简洁"
-```
-
-### 2. 🛠️ 强大的工具集
-
-```bash
-# 用户可以自然地描述需求
-oxide "读取 src/main.rs 并找出所有函数定义"
-oxide "找出项目中所有的 TODO 注释"
-oxide "搜索所有包含 'error' 的代码行"
-```
-
-内置 20+ 实用工具：
-
-
-| 工具类别 | 工具示例 | 功能描述 |
-|---------|---------|---------|
-| 📄 文件操作 | `read_file`, `write_file`, `edit_file` | 读取、写入、编辑文件 |
-| 🔍 代码搜索 | `grep_search`, `scan_codebase` | 搜索文本、扫描项目结构 |
-| 🗂️ 文件管理 | `create_directory`, `delete_file` | 创建目录、删除文件 |
-| 🎨 多文件编辑 | `multiedit` | 批量编辑多个文件 |
-| 🔧 开发工具 | `shell_execute`, `glob` | 执行命令、文件匹配 |
-| 🌿 Git 工具 | `commit_linter`, `git_guard` | 提交验证、Git 保护 |
-
-### 3. 🎯 技能系统
-
-创建可复用的编程技能：
-
-```bash
-# 创建新技能
-oxide skill create my-skill
-
-# 使用技能
-oxide use my-skill
-```
-
-### 4. 📊 会话记忆
-
-- 上下文感知的对话
-- 跨会话的项目记忆
-- 智能的工作流管理
-
-## 🎨 使用示例
-
-<details>
-<summary><b>🔧 实际对话示例</b>（点击展开）</summary>
-
-```bash
-# 示例 1: 代码分析
-$ oxide "分析 src/main.rs 的结构"
-
-📊 正在分析 src/main.rs...
-
-文件结构：
-├── 导入模块 (5 个)
-├── 函数定义 (8 个)
-└── 结构体定义 (3 个)
-
-主要功能模块：
-- CLI 命令处理
-- 工具执行器
-- 会话管理
-
-# 示例 2: 代码重构
-$ oxide "将 src/utils.rs 中的重复代码提取为函数"
-
-✅ 已完成重构！
-
-创建的新函数：
-- extract_common_logic() - 提取通用逻辑
-- validate_input() - 输入验证
-
-修改的文件：
-- src/utils.rs (+45, -89 行)
-
-需要我创建单元测试吗？
-
-# 示例 3: Git 提交验证
-$ oxide "帮我检查 Git 提交信息格式"
-
-🔍 检查最近的提交...
-
-✅ 所有提交信息格式正确！
-
-提交格式遵循 Conventional Commits 规范。
-```
-</details>
-
-## ⚙️ 配置
-
-### 配置文件位置
-
-```bash
-# Linux/macOS
-~/.config/oxide/config.toml
-
-# Windows
-%APPDATA%\oxide\config.toml
-```
-
-### 配置示例
-
-```toml
-# 模型配置
-[model]
-name = "gpt-4"
-temperature = 0.7
-max_tokens = 2000
-
-# 工具配置
-[tools]
-exclude_patterns = ["node_modules", ".git", "target"]
-max_results = 100
-
-# 技能配置
-[skills]
-directory = "~/.oxide/skills"
-auto_load = ["debug", "test"]
-```
-
-## 🔧 开发
-
-### 构建项目
-
-```bash
-# 克隆仓库
-git clone https://github.com/yourusername/oxide.git
-cd oxide
-
-# 构建
-cargo build --release
-
-# 运行测试
-cargo test
-
-# 运行
-cargo run -- --help
-```
-
-### 项目结构
-
-```
-oxide/
-├── src/
-│   ├── agent/       # AI 代理系统
-│   ├── cli/         # 命令行界面
-│   ├── tools/       # 工具集
-│   ├── skill/       # 技能系统
-│   └── task/        # 任务管理
-├── docs/            # 文档
-├── examples/        # 示例代码
-└── tests/           # 测试文件
-```
-
-## 🤝 贡献
-
-欢迎贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详情。
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-## 📄 许可证
-
-# 文件操作示例
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 🙏 致谢
-
-感谢以下开源项目：
-
-- [Rust](https://www.rust-lang.org/)
-- [CLAP](https://github.com/clap-rs/clap)
-- [Tokio](https://tokio.rs/)
-- [Regex](https://github.com/rust-lang/regex)
-- [Ignore](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore)
-
-## 📮 联系方式
-
-- 项目主页: [https://github.com/yourusername/oxide](https://github.com/yourusername/oxide)
-- 问题反馈: [GitHub Issues](https://github.com/yourusername/oxide/issues)
-- 讨论区: [GitHub Discussions](https://github.com/yourusername/oxide/discussions)
-
----
-
-<div align="center">
-
-**⭐ 如果这个项目对你有帮助，请给个 Star！**
-
-Made with ❤️ by [Your Name](https://github.com/yourusername)
-
-</div>
-
 ### 从源代码编译
 
 ```bash
@@ -291,15 +65,44 @@ Oxide 支持以下 LLM 提供商：
 - **Anthropic** - `claude-3-5-sonnet`, `claude-4-opus`
 - **其他 OpenAI 兼容的 API** - 只需配置正确的 API_URL 和 MODEL_NAME
 
+### 配置文件
+
+可选配置文件位置：
+
+```bash
+# Linux/macOS
+~/.config/oxide/config.toml
+
+# Windows
+%APPDATA%\oxide\config.toml
+```
+
+配置示例：
+
+```toml
+# 模型配置
+[model]
+name = "gpt-4"
+temperature = 0.7
+max_tokens = 2000
+
+# 工具配置
+[tools]
+exclude_patterns = ["node_modules", ".git", "target"]
+max_results = 100
+
+# 技能配置
+[skills]
+directory = "~/.oxide/skills"
+auto_load = ["debug", "test"]
+```
+
 ## 使用方法
 
 ### 启动 CLI
 
 ```bash
-# 如果使用 npm 安装
-oxide
-
-# 或使用 cargo run
+# 使用 cargo run
 cargo run
 
 # 或使用编译后的二进制文件
@@ -357,25 +160,6 @@ Oxide 支持实时渲染 AI 回复中的 Markdown 格式，提供更好的阅读
 - **代码块** - 三反引号包围（灰色背景）
 - **列表** - `- 列表项` 或 `* 列表项`
 
-### 渲染示例
-
-当 AI 回复包含 Markdown 格式时，会自动渲染：
-
-```markdown
-## 这是一级标题
-这是 **粗体文本** 和 *斜体文本*
-这是 `行内代码`
-
-- 列表项 1
-- 列表项 2
-
-```
-代码块
-```
-```
-
-所有这些都会被正确渲染成彩色格式，提升可读性。
-
 ## 工具调用
 
 Oxide 提供以下工具：
@@ -388,6 +172,7 @@ Oxide 提供以下工具：
 6. **grep_search** - 使用正则表达式搜索文件内容
 7. **scan_codebase** - 扫描并显示代码库目录结构
 8. **shell_execute** - 执行 Shell 命令
+9. **glob** - 文件模式匹配
 
 ### 工具使用示例
 
@@ -532,7 +317,7 @@ cargo build
 cargo build --release
 ```
 
-## 项目结构
+### 项目结构
 
 ```
 oxide/
@@ -626,10 +411,42 @@ oxide/
   - 添加进度条显示
   - 支持异步工具执行
 
-## 许可证
-
-MIT License
-
 ## 贡献
 
-欢迎提交 Issue 和 Pull Request！
+欢迎贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详情。
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+
+## 🙏 致谢
+
+感谢以下开源项目：
+
+- [Rust](https://www.rust-lang.org/)
+- [CLAP](https://github.com/clap-rs/clap)
+- [Tokio](https://tokio.rs/)
+- [Regex](https://github.com/rust-lang/regex)
+- [Ignore](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore)
+
+## 📮 联系方式
+
+- 项目主页: [https://github.com/zzfn/oxide](https://github.com/zzfn/oxide)
+- 问题反馈: [GitHub Issues](https://github.com/zzfn/oxide/issues)
+- 讨论区: [GitHub Discussions](https://github.com/zzfn/oxide/discussions)
+
+---
+
+<div align="center">
+
+**⭐ 如果这个项目对你有帮助，请给个 Star！**
+
+Made with ❤️ by [zzfn](https://github.com/zzfn)
+
+</div>

@@ -333,16 +333,6 @@ pub enum AgentEnum {
     OpenAI(Agent<openai::responses_api::ResponsesCompletionModel>),
 }
 
-impl AgentEnum {
-    /// 获取 Agent 类型的名称
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            AgentEnum::Anthropic(_) => "claude",
-            AgentEnum::OpenAI(_) => "openai",
-        }
-    }
-}
-
 /// 便捷函数:创建指定类型的 Agent
 #[allow(dead_code)]
 pub fn create_agent_of_type(

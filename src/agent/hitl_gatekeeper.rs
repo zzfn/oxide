@@ -6,11 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// HITL Gatekeeper 配置
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct HitlConfig {
-    /// 是否启用 HITL
-    pub enabled: bool,
-
     /// 信任度设置
     pub trust: TrustConfig,
 }
@@ -18,14 +16,15 @@ pub struct HitlConfig {
 impl Default for HitlConfig {
     fn default() -> Self {
         Self {
-            enabled: std::env::var("OXIDE_HITL_ENABLED")
-                .unwrap_or("true".to_string()) == "true",
             trust: TrustConfig::default(),
         }
     }
 }
 
+
+
 /// 信任度配置
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TrustConfig {
     /// 初始信任分数 (0.0 - 1.0)
@@ -53,6 +52,7 @@ impl Default for TrustConfig {
 }
 
 /// 工具调用请求
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolCallRequest {
     /// 工具名称
@@ -66,6 +66,7 @@ pub struct ToolCallRequest {
 }
 
 /// 操作上下文
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub struct OperationContext {
     /// 用户最近的历史操作
@@ -82,6 +83,7 @@ pub struct OperationContext {
 }
 
 /// HITL 决策结果
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HitlDecision {
     /// 直接执行，不需要确认
@@ -110,6 +112,7 @@ pub enum HitlDecision {
 }
 
 /// 警告级别
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WarningLevel {
     Info,
@@ -120,6 +123,7 @@ pub enum WarningLevel {
 }
 
 /// 用户选项
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserChoice {
     pub label: String,
@@ -127,6 +131,7 @@ pub struct UserChoice {
 }
 
 /// HITL Gatekeeper
+#[allow(dead_code)]
 ///
 /// 轻量级的人机交互决策层，不需要额外的 AI 模型，
 /// 直接使用规则引擎和信任度系统进行智能决策。
@@ -138,6 +143,7 @@ pub struct HitlGatekeeper {
 
 impl HitlGatekeeper {
     /// 创建新的 HITL Gatekeeper
+    #[allow(dead_code)]
     pub fn new(config: HitlConfig) -> Result<Self, HitlError> {
         let initial_score = config.trust.initial_score;
         Ok(Self {
@@ -147,24 +153,18 @@ impl HitlGatekeeper {
         })
     }
 
+    #[allow(dead_code)]
     /// 评估工具调用是否需要人工确认
     pub async fn evaluate_tool_call(
         &self,
         request: ToolCallRequest,
     ) -> Result<HitlDecision, HitlError> {
-        // 1. 检查是否启用 HITL
-        if !self.config.enabled {
-            return Ok(HitlDecision::ExecuteDirectly {
-                reason: "HITL 已禁用".to_string(),
-            });
-        }
-
-        // 2. 快速路径：已知的低风险操作
+        // 1. 快速路径：已知的低风险操作
         if let Some(decision) = self.quick_path(&request).await {
             return Ok(decision);
         }
 
-        // 3. 检查信任分数
+        // 2. 检查信任分数
         let trust_score = *self.trust_score.lock().await;
         if trust_score >= self.config.trust.auto_approve_threshold {
             // 高信任度：对于中低风险操作自动批准
@@ -175,10 +175,11 @@ impl HitlGatekeeper {
             }
         }
 
-        // 4. 使用规则判断（简化版，暂时不用 AI）
+        // 3. 使用规则判断（简化版，暂时不用 AI）
         Ok(self.rule_based_decision(request))
     }
 
+    #[allow(dead_code)]
     /// 记录操作成功（提高信任分数）
     pub async fn record_success(&self, operation: String) {
         let mut score = self.trust_score.lock().await;
@@ -195,6 +196,7 @@ impl HitlGatekeeper {
         }
     }
 
+    #[allow(dead_code)]
     /// 记录用户拒绝（降低信任分数）
     pub async fn record_rejection(&self) {
         let mut score = self.trust_score.lock().await;
@@ -330,6 +332,7 @@ impl HitlGatekeeper {
     }
 
     /// 获取当前信任分数
+    #[allow(dead_code)]
     pub async fn trust_score(&self) -> f32 {
         *self.trust_score.lock().await
     }

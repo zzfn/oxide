@@ -13,6 +13,7 @@ pub enum FileToolError {
     #[error("Input is invalid: {0}")]
     InvalidInput(String),
     #[error("Operation cancelled by user")]
+    #[allow(dead_code)]
     Cancelled,
 }
 

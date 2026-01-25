@@ -1,12 +1,14 @@
 use super::FileToolError;
 use colored::*;
 use diffy::{apply, Patch};
+use super::ask_user_question::{ask_question_interactive, Question, QuestionOption};
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use similar::{TextDiff};
+use std::borrow::Cow;
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 
 /// 检查是否启用预览模式
@@ -43,7 +45,11 @@ fn render_colored_diff(original: &str, modified: &str) {
 }
 
 /// 请求用户确认
-fn request_confirmation(lines_added: usize, lines_removed: usize) -> io::Result<bool> {
+fn request_confirmation(
+    lines_added: usize,
+    lines_removed: usize,
+    confirmation: Option<&Question>,
+) -> Result<bool, FileToolError> {
     print!(
         "\n{} {} (+{} lines, -{} lines)\n",
         "❓".bright_yellow(),
@@ -51,24 +57,183 @@ fn request_confirmation(lines_added: usize, lines_removed: usize) -> io::Result<
         lines_added.to_string().green(),
         lines_removed.to_string().red()
     );
-    print!(
-        "{}  [Y/n] ",
-        "💡".bright_blue(),
+    let default_question = Question {
+        question: "确认应用此修改？".to_string(),
+        header: "确认".to_string(),
+        options: vec![
+            QuestionOption {
+                label: "是".to_string(),
+                description: "应用当前修改".to_string(),
+            },
+            QuestionOption {
+                label: "否".to_string(),
+                description: "取消本次修改".to_string(),
+            },
+        ],
+        multi_select: false,
+    };
+
+    let question = confirmation.cloned().unwrap_or(default_question);
+    let approve_label = question
+        .options
+        .first()
+        .map(|opt| opt.label.clone())
+        .unwrap_or_else(|| "是".to_string());
+
+    let answer = ask_question_interactive(&question)?;
+    match answer.selected {
+        serde_json::Value::String(label) => Ok(label == approve_label),
+        serde_json::Value::Array(labels) => Ok(labels
+            .iter()
+            .any(|item| item.as_str() == Some(&approve_label))),
+        _ => Ok(false),
+    }
+}
+
+fn build_parse_error<E: std::fmt::Display>(e: E, patch_str: &str) -> FileToolError {
+    // 提取 patch 的前几行用于诊断
+    let preview_lines: Vec<&str> = patch_str.lines().take(20).collect();
+    let patch_preview = preview_lines.join("\n");
+
+    let error_msg = format!(
+        "Failed to parse patch: {}\n\n\
+         ═══════════════════════════════════════════════════════════\n\
+         🔍 Patch 解析失败 - 诊断信息:\n\
+         ═══════════════════════════════════════════════════════════\n\
+         \n\
+         常见原因:\n\
+         1. ❌ Hunk header 格式错误\n\
+            正确格式: @@ -line_count,count +line_count,count @@\n\
+         2. ❌ 缺少足够的上下文行（推荐 3 行）\n\
+         3. ❌ 行号不准确（文件内容可能已改变）\n\
+         4. ❌ 缩进不匹配（空格/制表符）\n\
+         5. ❌ 缺少 ---/+++ 文件头\n\
+         \n\
+         📋 Patch 内容预览（前 20 行）:\n\
+         ─────────────────────────────────────────────────────────────\n\
+         {}\n\
+         ─────────────────────────────────────────────────────────────\n\
+         \n\
+         💡 建议:\n\
+         - 检查 hunk header 中的行号是否准确\n\
+         - 确保包含足够的上下文行\n\
+         - 使用 Read 工具确认当前文件内容\n\
+         - 或考虑使用 search-replace 格式代替 unified diff",
+        e, patch_preview
     );
 
-    io::stdout().flush()?;
+    FileToolError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        error_msg,
+    ))
+}
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+fn parse_range(range: &str) -> Option<(usize, usize)> {
+    let range = range.trim_start_matches(['-', '+']);
+    let mut iter = range.split(',');
+    let start = iter.next()?.parse().ok()?;
+    let count = match iter.next() {
+        Some(val) => val.parse().ok()?,
+        None => 1,
+    };
+    Some((start, count))
+}
 
-    let input = input.trim().to_lowercase();
-    Ok(input.is_empty() || input == "y" || input == "yes")
+fn rebuild_hunk_header(header: &str, hunk_lines: &[&str]) -> Option<String> {
+    if !header.starts_with("@@") {
+        return None;
+    }
+
+    let rest = &header[2..];
+    let idx = rest.find("@@")?;
+    let header_body = rest[..idx].trim();
+    let trailing = &rest[idx + 2..];
+    let mut parts = header_body.split_whitespace();
+    let old_range = parts.next()?;
+    let new_range = parts.next()?;
+    let (old_start, _) = parse_range(old_range)?;
+    let (new_start, _) = parse_range(new_range)?;
+
+    let mut old_count = 0usize;
+    let mut new_count = 0usize;
+    for line in hunk_lines {
+        if line.starts_with(' ') {
+            old_count += 1;
+            new_count += 1;
+        } else if line.starts_with('-') {
+            old_count += 1;
+        } else if line.starts_with('+') {
+            new_count += 1;
+        } else if line.starts_with('\\') {
+            // "\ No newline at end of file" 不计入行数
+        }
+    }
+
+    Some(format!(
+        "@@ -{},{} +{},{} @@{}",
+        old_start, old_count, new_start, new_count, trailing
+    ))
+}
+
+fn normalize_patch_hunk_counts(patch: &str) -> String {
+    let lines: Vec<&str> = patch.lines().collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut i = 0usize;
+
+    while i < lines.len() {
+        let line = lines[i];
+        if line.starts_with("@@") {
+            let mut j = i + 1;
+            while j < lines.len() && !lines[j].starts_with("@@") {
+                j += 1;
+            }
+            let hunk_lines = &lines[i + 1..j];
+            if let Some(new_header) = rebuild_hunk_header(line, hunk_lines) {
+                out.push(new_header);
+            } else {
+                out.push(line.to_string());
+            }
+            for &hunk_line in hunk_lines {
+                out.push(hunk_line.to_string());
+            }
+            i = j;
+        } else {
+            out.push(line.to_string());
+            i += 1;
+        }
+    }
+
+    let mut normalized = out.join("\n");
+    if patch.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}
+
+fn normalize_patch_for_parse<'a>(patch_str: &'a str) -> Result<Cow<'a, str>, FileToolError> {
+    match Patch::from_str(patch_str) {
+        Ok(_patch) => Ok(Cow::Borrowed(patch_str)),
+        Err(e) => {
+            let err_msg = e.to_string();
+            if err_msg.contains("Hunk header does not match hunk") {
+                let repaired = normalize_patch_hunk_counts(patch_str);
+                if repaired != patch_str {
+                    if Patch::from_str(&repaired).is_ok() {
+                        return Ok(Cow::Owned(repaired));
+                    }
+                }
+            }
+            Err(build_parse_error(e, patch_str))
+        }
+    }
 }
 
 #[derive(Deserialize)]
 pub struct EditFileArgs {
     pub file_path: String,
     pub patch: String,
+    #[serde(default)]
+    pub confirmation: Option<Question>,
 }
 
 #[derive(Serialize, Debug)]
@@ -191,6 +356,43 @@ impl Tool for EditFileTool {
                     "patch": {
                         "type": "string",
                         "description": "A complete unified diff patch with proper headers and hunks. Must include ---/+++ headers and @@ hunk headers with correct line numbers."
+                    },
+                    "confirmation": {
+                        "type": "object",
+                        "description": "Optional confirmation prompt. The first option is treated as approval; other selections cancel the edit.",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The complete question text"
+                            },
+                            "header": {
+                                "type": "string",
+                                "description": "Short header/title for the question (max 12 chars recommended)"
+                            },
+                            "options": {
+                                "type": "array",
+                                "description": "List of answer options. The first option is treated as approval.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "label": {
+                                            "type": "string",
+                                            "description": "Short option label"
+                                        },
+                                        "description": {
+                                            "type": "string",
+                                            "description": "Detailed description of the option"
+                                        }
+                                    },
+                                    "required": ["label", "description"]
+                                }
+                            },
+                            "multi_select": {
+                                "type": "boolean",
+                                "description": "Whether to allow multiple selections (default: false)"
+                            }
+                        },
+                        "required": ["question", "header", "options", "multi_select"]
                     }
                 },
                 "required": ["file_path", "patch"]
@@ -223,44 +425,10 @@ impl Tool for EditFileTool {
             patch_str.to_string()
         };
 
-        // Parse the patch using diffy
-        let patch = Patch::from_str(&patch_str_normalized).map_err(|e| {
-            // 提取 patch 的前几行用于诊断
-            let preview_lines: Vec<&str> = patch_str_normalized.lines().take(20).collect();
-            let patch_preview = preview_lines.join("\n");
-
-            let error_msg = format!(
-                "Failed to parse patch: {}\n\n\
-                 ═══════════════════════════════════════════════════════════\n\
-                 🔍 Patch 解析失败 - 诊断信息:\n\
-                 ═══════════════════════════════════════════════════════════\n\
-                 \n\
-                 常见原因:\n\
-                 1. ❌ Hunk header 格式错误\n\
-                    正确格式: @@ -line_count,count +line_count,count @@\n\
-                 2. ❌ 缺少足够的上下文行（推荐 3 行）\n\
-                 3. ❌ 行号不准确（文件内容可能已改变）\n\
-                 4. ❌ 缩进不匹配（空格/制表符）\n\
-                 5. ❌ 缺少 ---/+++ 文件头\n\
-                 \n\
-                 📋 Patch 内容预览（前 20 行）:\n\
-                 ─────────────────────────────────────────────────────────────\n\
-                 {}\n\
-                 ─────────────────────────────────────────────────────────────\n\
-                 \n\
-                 💡 建议:\n\
-                 - 检查 hunk header 中的行号是否准确\n\
-                 - 确保包含足够的上下文行\n\
-                 - 使用 Read 工具确认当前文件内容\n\
-                 - 或考虑使用 search-replace 格式代替 unified diff",
-                e, patch_preview
-            );
-
-            FileToolError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                error_msg,
-            ))
-        })?;
+        // Parse the patch using diffy (with repair for bad hunk counts)
+        let patch_str_used = normalize_patch_for_parse(&patch_str_normalized)?;
+        let patch = Patch::from_str(patch_str_used.as_ref())
+            .map_err(|e| build_parse_error(e, patch_str_used.as_ref()))?;
 
         // Apply the patch using diffy::apply
         let patched_content = apply(&current_content, &patch).map_err(|e| {
@@ -299,7 +467,7 @@ impl Tool for EditFileTool {
         })?;
 
         // Calculate statistics
-        let original_lines: Vec<&str> = args.patch.lines().collect();
+        let original_lines: Vec<&str> = patch_str_used.as_ref().lines().collect();
         let mut lines_added = 0usize;
         let mut lines_removed = 0usize;
 
@@ -363,44 +531,10 @@ impl EditFileTool {
             patch_str.to_string()
         };
 
-        // Parse the patch using diffy
-        let patch = Patch::from_str(&patch_str_normalized).map_err(|e| {
-            // 提取 patch 的前几行用于诊断
-            let preview_lines: Vec<&str> = patch_str_normalized.lines().take(20).collect();
-            let patch_preview = preview_lines.join("\n");
-
-            let error_msg = format!(
-                "Failed to parse patch: {}\n\n\
-                 ═══════════════════════════════════════════════════════════\n\
-                 🔍 Patch 解析失败 - 诊断信息:\n\
-                 ═══════════════════════════════════════════════════════════\n\
-                 \n\
-                 常见原因:\n\
-                 1. ❌ Hunk header 格式错误\n\
-                    正确格式: @@ -line_count,count +line_count,count @@\n\
-                 2. ❌ 缺少足够的上下文行（推荐 3 行）\n\
-                 3. ❌ 行号不准确（文件内容可能已改变）\n\
-                 4. ❌ 缩进不匹配（空格/制表符）\n\
-                 5. ❌ 缺少 ---/+++ 文件头\n\
-                 \n\
-                 📋 Patch 内容预览（前 20 行）:\n\
-                 ─────────────────────────────────────────────────────────────\n\
-                 {}\n\
-                 ─────────────────────────────────────────────────────────────\n\
-                 \n\
-                 💡 建议:\n\
-                 - 检查 hunk header 中的行号是否准确\n\
-                 - 确保包含足够的上下文行\n\
-                 - 使用 Read 工具确认当前文件内容\n\
-                 - 或考虑使用 search-replace 格式代替 unified diff",
-                e, patch_preview
-            );
-
-            FileToolError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                error_msg,
-            ))
-        })?;
+        // Parse the patch using diffy (with repair for bad hunk counts)
+        let patch_str_used = normalize_patch_for_parse(&patch_str_normalized)?;
+        let patch = Patch::from_str(patch_str_used.as_ref())
+            .map_err(|e| build_parse_error(e, patch_str_used.as_ref()))?;
 
         // Apply the patch using diffy::apply
         let patched_content = apply(&current_content, &patch).map_err(|e| {
@@ -439,7 +573,7 @@ impl EditFileTool {
         })?;
 
         // Calculate statistics
-        let original_lines: Vec<&str> = args.patch.lines().collect();
+        let original_lines: Vec<&str> = patch_str_used.as_ref().lines().collect();
         let mut lines_added = 0usize;
         let mut lines_removed = 0usize;
 
@@ -452,7 +586,7 @@ impl EditFileTool {
         }
 
         // 使用原始补丁字符串作为预览
-        let preview = patch_str_normalized.clone();
+        let preview = patch_str_used.into_owned();
 
         Ok((current_content, patched_content, lines_added, lines_removed, preview))
     }
@@ -499,7 +633,7 @@ impl Tool for WrappedEditFileTool {
                     println!();
 
                     // 请求用户确认
-                    match request_confirmation(lines_added, lines_removed) {
+                    match request_confirmation(lines_added, lines_removed, args.confirmation.as_ref()) {
                         Ok(true) => {
                             // 用户确认，应用修改
                             if let Err(e) = fs::write(&args.file_path, &patched_content) {
@@ -551,7 +685,7 @@ impl Tool for WrappedEditFileTool {
                         Err(e) => {
                             println!("  └─ {}", format!("读取输入错误: {}", e).red());
                             println!();
-                            Err(FileToolError::Io(e))
+                            Err(e)
                         }
                     }
                 }
@@ -588,7 +722,13 @@ impl Tool for WrappedEditFileTool {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::NamedTempFile;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[tokio::test]
     async fn test_preview_patch() {
@@ -607,6 +747,7 @@ mod tests {
 +line 2 modified
  line 3
 ".to_string(),
+            confirmation: None,
         };
 
         let result = tool.preview_patch(&args).await;
@@ -629,14 +770,46 @@ mod tests {
         assert!(preview.contains("line 2 modified"));
     }
 
+    #[tokio::test]
+    async fn test_preview_patch_repairs_hunk_counts() {
+        let tool = EditFileTool;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let test_path = temp_file.path().to_path_buf();
+        fs::write(&test_path, "line 1\nline 2\nline 3\n").unwrap();
+
+        let args = EditFileArgs {
+            file_path: test_path.to_str().unwrap().to_string(),
+            // 头部行数故意写错：实际 hunk 为 3 行
+            patch: "@@ -1,2 +1,2 @@
+ line 1
+-line 2
++line 2 modified
+ line 3
+".to_string(),
+            confirmation: None,
+        };
+
+        let result = tool.preview_patch(&args).await;
+        assert!(result.is_ok(), "应能自动修复 hunk 行数");
+
+        let (_original, modified, added, removed, _preview) = result.unwrap();
+        assert_eq!(modified, "line 1\nline 2 modified\nline 3\n");
+        assert_eq!(added, 1);
+        assert_eq!(removed, 1);
+    }
+
     #[test]
     fn test_preview_enabled_default() {
+        let _guard = env_lock().lock().unwrap();
+        env::remove_var("OXIDE_EDIT_PREVIEW");
         // 默认应该启用预览
         assert!(preview_enabled());
     }
 
     #[test]
     fn test_preview_disabled_by_env() {
+        let _guard = env_lock().lock().unwrap();
         // 临时设置环境变量
         env::set_var("OXIDE_EDIT_PREVIEW", "false");
         assert!(!preview_enabled());
@@ -660,6 +833,7 @@ mod tests {
 -old
 +new
 ".to_string(),
+            confirmation: None,
         };
 
         let result = tool.preview_patch(&args).await;
@@ -691,6 +865,7 @@ mod tests {
 +line 10 modified
 +line 11 modified
 ".to_string(),
+            confirmation: None,
         };
 
         let result = tool.preview_patch(&args).await;

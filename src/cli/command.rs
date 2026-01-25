@@ -2,7 +2,7 @@ use crate::agent::{AgentType, NewAgentType, SubagentManager};
 use crate::context::SerializableMessage;
 use crate::hooks::SessionIdHook;
 use crate::skill::{SkillExecutor, SkillManager};
-use crate::token_counter::{count_tokens, count_messages_tokens, TokenUsage};
+use crate::token_counter::{count_messages_tokens, TokenUsage};
 use super::file_resolver::parse_file_references;
 use anyhow::Result;
 use colored::*;

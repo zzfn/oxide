@@ -95,7 +95,7 @@ fn build_command_entries() -> Vec<(String, String)> {
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     entries
 }
-
+#[allow(dead_code)]
 fn build_context_entries() -> Vec<(String, String)> {
     vec![
         ("@file".to_string(), "引用文件".to_string()),

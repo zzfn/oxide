@@ -2,6 +2,8 @@
 //!
 //! 展示如何在现有的 Agent 中集成 HITL Gatekeeper
 
+#![allow(dead_code)]
+
 use crate::agent::hitl_gatekeeper::{HitlConfig, HitlDecision, HitlGatekeeper, ToolCallRequest, OperationContext, WarningLevel};
 use crate::tools::ask_user_question::{WrappedAskUserQuestionTool, QuestionOption};
 use rig::tool::Tool;
@@ -19,10 +21,8 @@ impl HitlIntegration {
     /// 创建新的 HITL 集成实例
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let config = HitlConfig {
-            enabled: true,
-            trust: Default::default(),
+            trust: crate::agent::hitl_gatekeeper::TrustConfig::default(),
         };
-
         let gatekeeper = HitlGatekeeper::new(config)?;
         let ask_user_tool = WrappedAskUserQuestionTool::new();
 

@@ -17,6 +17,7 @@ fn get_cl100k_base() -> &'static tiktoken_rs::CoreBPE {
 ///
 /// # 返回
 /// token 数量
+#[allow(dead_code)]
 pub fn count_tokens(text: &str) -> usize {
     let bpe = get_cl100k_base();
     bpe.encode_with_special_tokens(text).len()
@@ -30,6 +31,7 @@ pub struct TokenUsage {
     /// 输出 token 数（预估）
     pub output_tokens: usize,
     /// 总 token 数
+    #[allow(dead_code)]
     pub total_tokens: usize,
 }
 

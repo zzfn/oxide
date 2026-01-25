@@ -187,6 +187,7 @@ impl Tool for MultiEditTool {
             let edit_args = super::edit_file::EditFileArgs {
                 file_path: operation.file_path.clone(),
                 patch: operation.patch.clone(),
+                confirmation: None,
             };
 
             match self.edit_tool.call(edit_args).await {
