@@ -6,11 +6,13 @@ Oxide 是一个支持任意 AI 模型的通用 AI Agent CLI 工具，提供对�
 ## Tech Stack
 - **Rust** (Edition 2021) - 主要编程语言
 - **Tokio** (v1.40) - 异步运行时
+- **rig-core** (v0.28.0) - AI Agent 框架，支持多种 LLM 提供商
 - **reqwest** (v0.12) - HTTP 客户端，支持与多种 AI 提供商 API 交互
 - **serde/serde_json** (v1.0) - 序列化和反序列化，用于 API 请求响应
-- **clap** (v4.5) - 命令行参数解析
+- **toml** (v0.8) - TOML 配置文件解析
+- **reedline** (v0.38) - 命令行界面库
 - **dotenv** (v0.15) - 环境变量加载（API Keys、配置等）
-- **colored** (v2.1) - 终端颜色输出
+- **colored** (v3.0) - 终端颜色输出
 - **anyhow** (v1.0) - 错误处理
 
 ## Project Conventions
@@ -25,12 +27,12 @@ Oxide 是一个支持任意 AI 模型的通用 AI Agent CLI 工具，提供对�
 
 ### Architecture Patterns
 - **单体 CLI 应用** - 单一可执行文件
-- **Provider 抽象** - 设计支持多种 AI 提供商，当前实现使用 Anthropic API
-- **Agent 模式** - Agent 结构体管理状态（客户端、API 密钥、消息历史、工具定义）
-- **消息驱动** - 基于 ContentBlock 类型系统（Text, ToolUse, ToolResult）
+- **Provider 抽象** - 支持 Anthropic Claude 和 OpenAI 兼容 API
+- **Agent 模式** - 使用 AgentBuilder + AgentEnum 构建，支持多种 Agent 类型（Main, Explore, Plan, CodeReviewer, FrontendDeveloper）
+- **消息驱动** - 基于 rig 库的 Message 类型系统
 - **工具执行循环** - 异步处理用户输入 → 发送消息 → 执行工具 → 返回结果
 - **模块化工具** - 工具实现分离到独立模块
-- **可扩展性** - 易于添加新的 AI 提供商和工具
+- **可扩展性** - 易于添加新的 AI 提供商（通过 OpenAI 兼容接口）和工具
 
 ### Testing Strategy
 - 使用 Rust 标准测试框架
@@ -52,10 +54,11 @@ Oxide 是一个支持任意 AI 模型的通用 AI Agent CLI 工具，提供对�
 ## Domain Context
 Oxide 是一个通用 AI 编程助手 CLI，核心概念包括：
 - **消息循环** - 用户输入 → AI 响应 → 工具执行 → 结果返回
-- **工具系统** - AI 可以调用预定义的工具（read_file, write_file, shell_execute）
-- **模型抽象** - 设计为支持多种 AI 提供商（Anthropic、OpenAI、Google 等）
+- **工具系统** - AI 可以调用预定义的工具（9 个核心工具 + 额外工具）
+- **模型抽象** - 使用 rig 库支持 Anthropic 和 OpenAI 兼容 API
 - **状态管理** - Agent 维护对话历史，支持多轮对话
 - **彩色输出** - 使用不同颜色区分用户输入、AI 响应、工具调用等
+- **多 Agent 架构** - 支持 Main, Explore, Plan, CodeReviewer, FrontendDeveloper 等 Agent 类型
 
 ## Important Constraints
 - **API 限制**: 受所选 AI 提供商的速率限制和配额约束
@@ -65,8 +68,9 @@ Oxide 是一个通用 AI 编程助手 CLI，核心概念包括：
 - **异步运行**: 使用 Tokio 异步运行时，所有 I/O 操作必须异步
 
 ## External Dependencies
-- **AI 提供商 API** - 当前实现使用 DeepSeek API 作为示例
-  - 当前模型: `deepseek-chat` 或 `deepseek-coder`
-  - API 端点: `https://api.deepseek.com/v1/chat/completions`（OpenAI 兼容格式）
-  - 认证: 需要提供商特定的 API Key（如 `DEEPSEEK_API_KEY`）
-  - 未来计划支持: Anthropic Claude、OpenAI、Google Gemini、其他 AI 提供商
+- **AI 提供商 API** - 当前实现支持 Anthropic Claude 和 OpenAI 兼容 API
+  - 当前默认模型: `claude-sonnet-4-20250514`
+  - API 端点: `https://api.anthropic.com` (默认) 或自定义 OpenAI 兼容端点
+  - 认证: 需要提供商特定的 API Key（推荐使用 `OXIDE_AUTH_TOKEN` 环境变量）
+  - Provider 判断: 基于 `OXIDE_BASE_URL` 中是否包含 "anthropic" 字符串
+  - 未来计划: 通过 OpenAI 兼容层支持更多提供商（如 DeepSeek、Google Gemini 等）
