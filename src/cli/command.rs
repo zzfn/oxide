@@ -9,6 +9,7 @@ use colored::*;
 use rig::completion::Message;
 use rig::streaming::StreamingPrompt;
 use std::io::{stdout, Write};
+use std::str::FromStr;
 
 use super::render::stream_with_animation;
 use super::OxideCli;
@@ -803,8 +804,8 @@ impl OxideCli {
     fn switch_agent(&mut self, agent_type_str: &str) -> Result<()> {
         // 解析 Agent 类型
         let agent_type = match NewAgentType::from_str(agent_type_str) {
-            Some(t) => t,
-            None => {
+            Ok(t) => t,
+            Err(_) => {
                 println!("{} Unknown agent type: {}", "❌".red(), agent_type_str);
                 println!("{} Available types:", "💡".bright_blue());
                 println!("  - main (Main Agent)");

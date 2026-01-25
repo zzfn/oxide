@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 /// Agent 类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -25,6 +26,22 @@ pub enum AgentType {
 
     /// 通用 Agent
     General,
+}
+
+impl FromStr for AgentType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "main" => Ok(AgentType::Main),
+            "explore" | "explorer" => Ok(AgentType::Explore),
+            "plan" | "planner" => Ok(AgentType::Plan),
+            "code_reviewer" | "code-reviewer" | "reviewer" => Ok(AgentType::CodeReviewer),
+            "frontend_developer" | "frontend-developer" | "frontend" => Ok(AgentType::FrontendDeveloper),
+            "general" => Ok(AgentType::General),
+            _ => Err(format!("Unknown agent type: {}", s)),
+        }
+    }
 }
 
 impl AgentType {
@@ -50,20 +67,6 @@ impl AgentType {
             AgentType::CodeReviewer => "代码审查 Agent，用于检查代码质量和安全性",
             AgentType::FrontendDeveloper => "前端开发 Agent，专注于 UI/UX 实现",
             AgentType::General => "通用 Agent，用于一般性任务",
-        }
-    }
-
-    /// 解析字符串为 Agent 类型
-    #[allow(dead_code)]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "main" => Some(AgentType::Main),
-            "explore" | "explorer" => Some(AgentType::Explore),
-            "plan" | "planner" => Some(AgentType::Plan),
-            "code_reviewer" | "code-reviewer" | "reviewer" => Some(AgentType::CodeReviewer),
-            "frontend_developer" | "frontend-developer" | "frontend" => Some(AgentType::FrontendDeveloper),
-            "general" => Some(AgentType::General),
-            _ => None,
         }
     }
 }
@@ -130,7 +133,45 @@ impl AgentCapability {
             system_prompt: r#"
 Your name is Oxide. You are a helpful AI code assistant with comprehensive file system and command execution access.
 You can read, write, edit (with patches), and delete files, execute bash commands, scan codebase structures, search text in the codebase and create directories.
-Use the edit_file tool for making small, targeted changes to existing files - it's more efficient than rewriting entire files.
+
+═══════════════════════════════════════════════════════════════════════════
+🔧 edit_file Tool 使用指南（CRITICAL）
+═══════════════════════════════════════════════════════════════════════════
+
+⚠️ 使用 edit_file 前必须遵守以下规则：
+
+1. 【必须】每次使用 edit_file 前，先使用 Read 工具读取文件的最新内容
+   - 不能假设文件内容或行号
+   - 必须基于实际文件内容生成 patch
+
+2. 【必须】Unified Diff 格式要求：
+   - 包含 ---/+++ 文件头
+   - Hunk header 格式：@@ -起始行,行数 +起始行,行数 @@
+   - 起始行从 1 开始计数
+   - 必须包含足够的上下文（推荐 3 行）
+
+3. 【必须】上下文行必须与文件内容完全匹配：
+   - 包括精确的缩进（空格/制表符）
+   - 不能有遗漏或多余的内容
+   - 上下文不匹配会导致 patch 应用失败
+
+4. 【推荐】小修改（< 10 行）使用 edit_file
+   - 大修改（≥ 10 行）考虑使用 write_file 重写整个文件
+
+5. 【错误处理】如果 patch 应用失败：
+   - 仔细阅读错误诊断信息
+   - 使用 Read 工具重新确认文件内容
+   - 重新生成正确的 patch
+
+═══════════════════════════════════════════════════════════════════════════
+
+Example workflow for editing a file:
+1. Read the file to see current content
+2. Identify the exact line numbers
+3. Create a unified diff patch with proper context
+4. Apply the patch using edit_file
+5. If it fails, read the error message and adjust
+
 Please provide clear and concise responses and be careful when modifying files or executing commands.
 "#.trim().to_string(),
             read_only: false,
@@ -233,7 +274,40 @@ Your expertise includes:
 - Responsive design and accessibility
 - Performance optimization
 - Creating polished, maintainable code that avoids generic AI aesthetics
+
+═══════════════════════════════════════════════════════════════════════════
+🔧 edit_file Tool 使用指南（CRITICAL）
+═══════════════════════════════════════════════════════════════════════════
+
+⚠️ 使用 edit_file 前必须遵守以下规则：
+
+1. 【必须】每次使用 edit_file 前，先使用 Read 工具读取文件的最新内容
+   - 不能假设文件内容或行号
+   - 必须基于实际文件内容生成 patch
+
+2. 【必须】Unified Diff 格式要求：
+   - 包含 ---/+++ 文件头
+   - Hunk header 格式：@@ -起始行,行数 +起始行,行数 @@
+   - 起始行从 1 开始计数
+   - 必须包含足够的上下文（推荐 3 行）
+
+3. 【必须】上下文行必须与文件内容完全匹配：
+   - 包括精确的缩进（空格/制表符）
+   - 特别注意 JSX/TSX 中的缩进层级
+   - 上下文不匹配会导致 patch 应用失败
+
+4. 【推荐】小修改（< 10 行）使用 edit_file
+   - 大修改（≥ 10 行）考虑使用 write_file 重写整个文件
+
+5. 【错误处理】如果 patch 应用失败：
+   - 仔细阅读错误诊断信息
+   - 使用 Read 工具重新确认文件内容
+   - 重新生成正确的 patch
+
+═══════════════════════════════════════════════════════════════════════════
+
 When building UI components, prioritize user experience, maintainability, and web standards compliance.
+Always read the file before editing to ensure your patches apply correctly.
 "#.trim().to_string(),
             read_only: false,
         }
@@ -280,10 +354,10 @@ mod tests {
 
     #[test]
     fn test_agent_type_from_str() {
-        assert_eq!(AgentType::from_str("main"), Some(AgentType::Main));
-        assert_eq!(AgentType::from_str("explore"), Some(AgentType::Explore));
-        assert_eq!(AgentType::from_str("EXPLORER"), Some(AgentType::Explore));
-        assert_eq!(AgentType::from_str("invalid"), None);
+        assert_eq!(AgentType::from_str("main"), Ok(AgentType::Main));
+        assert_eq!(AgentType::from_str("explore"), Ok(AgentType::Explore));
+        assert_eq!(AgentType::from_str("EXPLORER"), Ok(AgentType::Explore));
+        assert!(AgentType::from_str("invalid").is_err());
     }
 
     #[test]

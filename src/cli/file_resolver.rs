@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use colored::*;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// 文件引用信息
 #[derive(Debug, Clone)]
