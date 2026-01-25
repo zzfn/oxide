@@ -10,8 +10,9 @@
 ## ✨ 特性
 
 - 🧠 **智能对话** - 自然语言交互，理解你的编程需求
-- 🛠️ **20+ 集成工具** - 文件操作、代码搜索、Git 管理等
-- 🎯 **技能系统** - 自定义和复用编程技能
+- 🛠️ **9+ 核心工具** - 文件操作、代码搜索、Shell 执行等
+- 🎯 **技能系统** - 自定义和复用编程技能（内置、全局、本地）
+- 🤖 **多 Agent 支持** - Main, Explore, Plan, CodeReviewer, FrontendDeveloper
 - 📊 **会话记忆** - 上下文感知的长期对话
 - 🔍 **代码库扫描** - 智能解析项目结构
 - ⚡ **高性能** - 基于 Rust 构建，快速响应
@@ -45,57 +46,95 @@ cargo install oxide
 创建 `.env` 文件并设置以下变量：
 
 ```env
-API_KEY=your_api_key_here
-API_URL=https://api.deepseek.com/v1/chat/completions
-MODEL_NAME=deepseek-chat
-MAX_TOKENS=4096
+# API 认证 Token（必需）
+# 支持的环境变量（按优先级排序）:
+# 1. OXIDE_AUTH_TOKEN - 推荐使用
+# 2. ANTHROPIC_API_KEY - Anthropic API Key
+# 3. API_KEY - 通用 API Key
+OXIDE_AUTH_TOKEN=sk-your_token_here
+
+# API 基础地址（可选）
+# 默认: https://api.anthropic.com
+# 支持的环境变量（按优先级排序）:
+# 1. OXIDE_BASE_URL - 推荐使用
+# 2. API_URL - 通用 API URL
+OXIDE_BASE_URL=https://api.anthropic.com
+
+# 模型名称（可选）
+# 默认: claude-sonnet-4-20250514
+# 不填写则使用服务端默认模型
+MODEL_NAME=claude-sonnet-4-20250514
+
+# 最大 Token 数（可选）
+# MAX_TOKENS=4096
 ```
 
-配置说明：
-- `API_KEY`: LLM 提供商的 API 密钥（必需）
-- `API_URL`: API 端点 URL（可选，默认为 DeepSeek）
-- `MODEL_NAME`: 使用的模型名称（可选，默认为 deepseek-chat）
+**配置说明：**
+- `OXIDE_AUTH_TOKEN`: LLM 提供商的 API 密钥（必需）
+- `OXIDE_BASE_URL`: API 端点 URL（可选，默认为 Anthropic）
+- `MODEL_NAME`: 使用的模型名称（可选，不填写则使用服务端默认）
 - `MAX_TOKENS`: 最大 token 数（可选，默认为 4096）
 
 ### 支持的模型
 
 Oxide 支持以下 LLM 提供商：
-- **DeepSeek** - `deepseek-chat`, `deepseek-coder`
+
+- **Anthropic** - `claude-sonnet-4-20250514`, `claude-opus-4-20250514`
 - **OpenAI** - `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`
-- **Anthropic** - `claude-3-5-sonnet`, `claude-4-opus`
-- **其他 OpenAI 兼容的 API** - 只需配置正确的 API_URL 和 MODEL_NAME
+- **其他 OpenAI 兼容的 API** - 通过设置正确的 `OXIDE_BASE_URL` 使用
+
+**注意：** Provider 判断基于 `OXIDE_BASE_URL` 中是否包含 "anthropic" 字符串。使用非 Anthropic API 时，会使用 OpenAI 兼容接口。
 
 ### 配置文件
 
-可选配置文件位置：
+配置系统支持多层配置，按优先级从低到高：
+
+1. **全局配置** - `~/.oxide/config.toml` 或 `~/.oxide/config.toml`
+2. **项目配置** - `.oxide/config.toml`（覆盖全局配置）
+3. **项目指令** - `.oxide/CONFIG.md`（系统提示词）
+4. **环境变量** - 覆盖所有文件配置（最高优先级）
+
+**全局配置位置：**
 
 ```bash
 # Linux/macOS
-~/.config/oxide/config.toml
+~/.config/oxide/config.toml 或 ~/.oxide/config.toml
 
 # Windows
 %APPDATA%\oxide\config.toml
 ```
 
-配置示例：
+**配置示例：**
 
 ```toml
-# 模型配置
-[model]
-name = "gpt-4"
+# 默认模型配置
+[default]
+base_url = "https://api.anthropic.com"
+model = "claude-sonnet-4-20250514"
+max_tokens = 4096
 temperature = 0.7
-max_tokens = 2000
 
-# 工具配置
-[tools]
-exclude_patterns = ["node_modules", ".git", "target"]
-max_results = 100
+# Agent 特定配置
+[agent]
+explore.model = "claude-haiku-4-20250514"
+plan.model = "claude-sonnet-4-20250514"
+code_reviewer.model = "claude-sonnet-4-20250514"
 
-# 技能配置
-[skills]
-directory = "~/.oxide/skills"
-auto_load = ["debug", "test"]
+# 主题配置
+[theme]
+mode = "dark"
+# custom_theme = "my-theme.toml"
+
+# 功能开关
+[features]
+enable_mcp = false
+enable_multimodal = false
 ```
+
+**配置优先级说明：**
+- 环境变量 > 项目配置 > 全局配置
+- 如果没有配置文件，使用默认值
+- 可以使用 `OXIDE_AUTH_TOKEN`、`OXIDE_BASE_URL` 等环境变量覆盖文件配置
 
 ## 使用方法
 
@@ -117,24 +156,27 @@ cargo run
 |------|------|
 | `/help` | 显示帮助信息 |
 | `/clear` | 清空当前对话 |
-| `/config` | 显示当前配置 |
+| `/config [show|edit|reload|validate]` | 管理配置 |
 | `/history` | 显示当前会话的历史消息 |
 | `/sessions` | 列出所有保存的会话 |
 | `/load <id>` | 加载指定的会话 |
 | `/delete <id>` | 删除指定会话 |
-| `/agent [list|switch <type>]` | 管理或切换 Agent 类型 |
-| `/tasks [list|show <id>]` | 管理后台任务 |
+| `/agent [list|switch <type>|capabilities]` | 管理或切换 Agent 类型 ⚠️ |
+| `/tasks [list|show <id>|cancel <id>]` | 管理后台任务 |
 | `/skills [list|show <name>]` | 管理和使用技能 |
 | `/<skill-name>` | 执行指定的技能 |
 | `/exit` 或 `/quit` | 退出程序 |
+
+**⚠️ 注意：** 部分功能标记为实验性或未完全实现：
+- Agent 切换功能 (`/agent switch`) 当前仅记录类型，Agent 未完全重建
 
 ### 对话示例
 
 ```
 ==================================================
-Oxide CLI 0.1.0 - DeepSeek Agent
+Oxide CLI 0.1.0 - Anthropic Agent
 ==================================================
-模型: deepseek-chat
+模型: claude-sonnet-4-20250514
 会话: violet-sky-1234
 提示: 输入 /help 查看帮助
 提示: 输入 /exit 退出
@@ -162,7 +204,7 @@ Oxide 支持实时渲染 AI 回复中的 Markdown 格式，提供更好的阅读
 
 ## 工具调用
 
-Oxide 提供以下工具：
+Oxide 提供 9 个核心工具供 AI 使用：
 
 1. **read_file** - 读取文件内容
 2. **write_file** - 写入文件内容（自动创建不存在的目录）
@@ -173,6 +215,14 @@ Oxide 提供以下工具：
 7. **scan_codebase** - 扫描并显示代码库目录结构
 8. **shell_execute** - 执行 Shell 命令
 9. **glob** - 文件模式匹配
+
+**额外工具（已实现但未完全集成）：**
+- `multiedit` - 多文件编辑
+- `notebook_edit` - Jupyter Notebook 编辑
+- `ask_user_question` - 询问用户问题
+- `git_guard` - Git 操作保护
+- `commit_linter` - Commit 消息检查
+- `task`, `task_output` - 后台任务管理
 
 ### 工具使用示例
 
@@ -229,8 +279,11 @@ Oxide 提供了一些常用的内置技能：
 
 你可以创建自己的技能文件，存放在以下位置（按优先级排序）：
 
-1. `.oxide/skills/` - 项目本地技能（最高优先级）
-2. `~/.oxide/skills/` - 全局技能
+1. **本地技能** - `.oxide/skills/` - 项目本地技能（最高优先级）
+2. **全局技能** - `~/.oxide/skills/` - 全局技能
+3. **内置技能** - 内置在代码中的技能（最低优先级）
+
+技能加载时会按照以上顺序查找，优先使用高优先级的技能。
 
 技能文件格式（Markdown + Front Matter）：
 
