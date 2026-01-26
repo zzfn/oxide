@@ -158,11 +158,9 @@ impl AskUserQuestionTool {
     #[allow(dead_code)]
     fn ask_question_cli(question: &Question) -> Result<Answer, FileToolError> {
         println!();
-        println!("{}", "═".repeat(80).bright_black());
-        println!("{}", question.header.bright_cyan().bold());
-        println!("{}", "═".repeat(80).bright_black());
-        println!("{}", question.question.white());
-        println!();
+        if !question.header.is_empty() {
+             println!("{} {}", "◆".bright_cyan(), question.header.bright_cyan().bold());
+        }
 
         let display_items: Vec<String> = question
             .options
@@ -171,7 +169,7 @@ impl AskUserQuestionTool {
             .collect();
 
         if question.multi_select {
-            let selection = MultiSelect::new("请选择", display_items)
+            let selection = MultiSelect::new(&question.question, display_items)
                 .with_help_message("↑↓移动，Space选择，Enter确认")
                 .prompt();
 
@@ -199,7 +197,7 @@ impl AskUserQuestionTool {
             }
         } else {
             let selection =
-                Select::new("请选择", display_items)
+                Select::new(&question.question, display_items)
                 .with_help_message("↑↓移动，Enter确认，可输入筛选")
                 .prompt();
 

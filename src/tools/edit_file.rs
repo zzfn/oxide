@@ -49,16 +49,15 @@ fn request_confirmation(
     lines_removed: usize,
     confirmation: Option<&Question>,
 ) -> Result<bool, FileToolError> {
-    print!(
-        "\n{} {} (+{} lines, -{} lines)\n",
-        "❓".bright_yellow(),
-        "确认应用此修改？".bright_white(),
+    let stats = format!(
+        " (+{} lines, -{} lines)",
         lines_added.to_string().green(),
         lines_removed.to_string().red()
     );
+
     let default_question = Question {
-        question: "确认应用此修改？".to_string(),
-        header: "确认".to_string(),
+        question: format!("确认应用此修改？{}", stats),
+        header: "".to_string(),
         options: vec![
             QuestionOption {
                 label: "是".to_string(),
