@@ -292,8 +292,15 @@ impl HitlGatekeeper {
                     }
                 }
             }
-            "write_file" | "edit_file" | "multiedit" => {
-                // 编辑文件需要确认（除非信任分数很高）
+            "edit_file" => {
+                // 编辑文件 (Wrapper 版本) 已经内置了 diff 预览和确认
+                // 因此这里不需要再次确认，避免双重确认
+                HitlDecision::ExecuteDirectly {
+                    reason: "工具内置确认".to_string(),
+                }
+            }
+            "write_file" | "multiedit" => {
+                // 其他修改文件的工具需要确认
                 HitlDecision::RequireConfirmation {
                     reason: "即将修改文件".to_string(),
                     warning_level: WarningLevel::Low,

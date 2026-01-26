@@ -615,7 +615,7 @@ impl Tool for WrappedEditFileTool {
                                 lines_added,
                                 lines_removed,
                                 success: false,
-                                message: "用户取消了修改".to_string(),
+                                message: "用户取消了修改。请不要重试此操作，除非用户明确要求。".to_string(),
                                 preview: Some(preview),
                                 cancelled: true,
                             })

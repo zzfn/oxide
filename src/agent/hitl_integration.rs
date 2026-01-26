@@ -77,7 +77,7 @@ impl HitlIntegration {
                 println!(
                     "{} {}",
                     "✓".green(),
-                    format!("自动批准: {}", reason).dimmed()
+                    format!("自动批准({}): {}", request.tool_name, reason).dimmed()
                 );
                 Ok(HitlResult::Approved)
             }
