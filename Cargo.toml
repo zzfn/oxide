@@ -9,7 +9,6 @@ cli = ["reedline", "colored", "inquire", "termimad", "crossterm"]
 
 [dependencies]
 tokio = { version = "1.40", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
@@ -40,6 +39,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 git2 = "0.19"
 tiktoken-rs = "0.5"
 nu-ansi-term = "0.50"
+tree-sitter = "0.22"
 
 [dev-dependencies]
 mockito = "1.4"
