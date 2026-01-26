@@ -34,6 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match hitl.evaluate_and_confirm(request).await? {
         HitlResult::Approved => println!("  {} 已批准\n", "✓".green()),
         HitlResult::Rejected => println!("  {} 已拒绝\n", "✗".red()),
+        HitlResult::Suggested(s) => println!("  {} 收到建议: {}\n", "💡".cyan(), s),
     }
 
     // 3. 示例 2：删除文件（需要确认）
@@ -59,6 +60,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         HitlResult::Rejected => {
             println!("  {} 用户取消删除\n", "✗".red());
             hitl.record_rejection().await;
+        }
+        HitlResult::Suggested(s) => {
+            println!("  {} 收到建议: {}\n", "💡".cyan(), s);
         }
     }
 
@@ -91,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match hitl.evaluate_and_confirm(request).await? {
         HitlResult::Approved => println!("  {} 已批准\n", "✓".green()),
         HitlResult::Rejected => println!("  {} 已拒绝\n", "✗".red()),
+        HitlResult::Suggested(s) => println!("  {} 收到建议: {}\n", "💡".cyan(), s),
     }
 
     println!("{}", "演示完成！".bright_cyan().bold());

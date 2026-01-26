@@ -87,7 +87,36 @@ pub fn ask_question_interactive(question: &Question) -> Result<Answer, FileToolE
 }
 
 impl AskUserQuestionTool {
+    fn ask_question_free_text(question: &Question) -> Result<Answer, FileToolError> {
+        print!("{} ", question.question.bright_green());
+        io::stdout().flush().map_err(|e| FileToolError::Io(e))?;
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| FileToolError::Io(e))?;
+
+        let input = input.trim().to_string();
+        if input.is_empty() {
+            return Ok(Answer {
+                question_header: question.header.clone(),
+                selected: serde_json::json!(null),
+                has_answer: false,
+            });
+        }
+
+        Ok(Answer {
+            question_header: question.header.clone(),
+            selected: serde_json::json!(input),
+            has_answer: true,
+        })
+    }
+
     fn ask_question_manual_input(question: &Question) -> Result<Answer, FileToolError> {
+        if question.options.is_empty() {
+            return Self::ask_question_free_text(question);
+        }
+
         let prompt = if question.multi_select {
             format!(
                 "{} (多个选项用逗号分隔, 例如: 1,3): ",
@@ -160,6 +189,10 @@ impl AskUserQuestionTool {
         println!();
         if !question.header.is_empty() {
              println!("{} {}", "◆".bright_cyan(), question.header.bright_cyan().bold());
+        }
+
+        if question.options.is_empty() {
+            return Self::ask_question_free_text(question);
         }
 
         let display_items: Vec<String> = question

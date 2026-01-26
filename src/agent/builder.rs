@@ -16,6 +16,8 @@ use rig::client::CompletionClient;
 use rig::providers::{anthropic, openai};
 use std::sync::Arc;
 
+use crate::agent::workflow::observation::ObservationCollector;
+
 /// Agent 构建器
 ///
 /// 根据指定的 Agent 类型创建相应的 Agent 实例,配置对应的系统提示词和工具权限。
@@ -31,6 +33,9 @@ pub struct AgentBuilder {
 
     /// HITL 集成 (可选)
     hitl: Option<Arc<HitlIntegration>>,
+
+    /// 观察数据收集器 (可选)
+    observation_collector: Option<ObservationCollector>,
 }
 
 impl AgentBuilder {
@@ -41,12 +46,19 @@ impl AgentBuilder {
             auth_token,
             model,
             hitl: None,
+            observation_collector: None,
         }
     }
 
     /// 设置 HITL 集成
     pub fn with_hitl(mut self, hitl: Arc<HitlIntegration>) -> Self {
         self.hitl = Some(hitl);
+        self
+    }
+
+    /// 设置观察收集器
+    pub fn with_observations(mut self, collector: ObservationCollector) -> Self {
+        self.observation_collector = Some(collector);
         self
     }
 

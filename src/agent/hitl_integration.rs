@@ -127,6 +127,10 @@ impl HitlIntegration {
                         label: "取消".to_string(),
                         description: "取消此操作".to_string(),
                     },
+                    QuestionOption {
+                        label: "提供反馈".to_string(),
+                        description: "提供纠正建议或反馈".to_string(),
+                    },
                 ],
                 multi_select: false,
             }],
@@ -135,8 +139,27 @@ impl HitlIntegration {
         match self.ask_user_tool.call(args).await {
             Ok(output) => {
                 if let Some(answer) = output.answers.get("确认") {
-                    if answer.as_str() == Some("确认") || answer.as_str() == Some("是") {
+                    let answer_str = answer.as_str().unwrap_or("");
+                    if answer_str == "确认" || answer_str == "是" {
                         return Ok(HitlResult::Approved);
+                    } else if answer_str == "提供反馈" {
+                        // 如果用户选择提供反馈，尝试获取反馈内容
+                        // 这里我们可以复用 ask_user_tool 来获取输入
+                        let feedback_args = crate::tools::ask_user_question::AskUserQuestionArgs {
+                            questions: vec![crate::tools::ask_user_question::Question {
+                                question: "请输入您的纠正建议:".to_string(),
+                                header: "路径纠正反馈".to_string(),
+                                options: vec![], // 空选项表示允许自由文本输入
+                                multi_select: false,
+                            }],
+                        };
+                        if let Ok(feedback_output) = self.ask_user_tool.call(feedback_args).await {
+                            if let Some(feedback) = feedback_output.answers.get("路径纠正反馈") {
+                                if let Some(feedback_text) = feedback.as_str() {
+                                    return Ok(HitlResult::Suggested(feedback_text.to_string()));
+                                }
+                            }
+                        }
                     }
                 }
                 Ok(HitlResult::Rejected)
@@ -230,6 +253,9 @@ pub enum HitlResult {
 
     /// 用户拒绝，取消操作
     Rejected,
+
+    /// 用户提供了改进建议或路径纠正
+    Suggested(String),
 }
 
 /// HITL 集成错误
@@ -327,6 +353,11 @@ where
             Ok(HitlResult::Rejected) => {
                 println!("{} {} 操作已被用户取消", "🚫".red(), T::NAME);
                 // 使用内部方法创建取消错误。如果工具支持，则返回具体的取消错误。
+                Err(self.create_cancellation_error())
+            }
+            Ok(HitlResult::Suggested(suggestion)) => {
+                println!("{} 用户提供了改进建议: {}", "💡".cyan(), suggestion);
+                // 收到建议时，我们停止当前工具调用，以便 Agent 反思建议。
                 Err(self.create_cancellation_error())
             }
             Err(e) => {

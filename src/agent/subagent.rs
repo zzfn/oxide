@@ -2,8 +2,10 @@
 //!
 //! 提供多 Agent 系统的管理功能，包括 Agent 注册、切换和能力查询。
 
+use crate::agent::builder::{AgentBuilder, AgentEnum};
 use crate::agent::types::{AgentCapability, AgentType};
 use anyhow::Result;
+use rig::completion::Prompt;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -17,6 +19,9 @@ pub struct SubagentManager {
 
     /// Agent 能力映射
     capabilities: HashMap<AgentType, AgentCapability>,
+
+    /// Agent 构建器 (用于委派时创建 Agent 实例)
+    agent_builder: Option<AgentBuilder>,
 }
 
 impl SubagentManager {
@@ -28,7 +33,15 @@ impl SubagentManager {
         Self {
             current_agent,
             capabilities,
+            agent_builder: None,
         }
+    }
+
+    /// 使用构建器创建新的 Subagent 管理器
+    pub fn with_builder(builder: AgentBuilder) -> Self {
+        let mut manager = Self::new();
+        manager.agent_builder = Some(builder);
+        manager
     }
 
     /// 注册 Agent 能力
@@ -37,6 +50,37 @@ impl SubagentManager {
     #[allow(dead_code)]
     pub fn register(&mut self, agent_type: AgentType, capability: AgentCapability) {
         self.capabilities.insert(agent_type, capability);
+    }
+
+    /// 委派任务给指定类型的 Agent 执行
+    ///
+    /// # 参数
+    ///
+    /// * `agent_type` - 要委派的 Agent 类型
+    /// * `request` - 任务请求描述
+    ///
+    /// # 返回
+    ///
+    /// Agent 的执行结果
+    pub async fn delegate(&self, agent_type: AgentType, request: &str) -> Result<String> {
+        let builder = self.agent_builder.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("SubagentManager 未配置 AgentBuilder，无法进行委派")
+        })?;
+
+        // 构建对应的 Agent
+        let agent_enum = builder.build_with_type(agent_type)?;
+
+        // 执行任务
+        match agent_enum {
+            AgentEnum::Anthropic(agent) => {
+                let response = agent.prompt(request).await?;
+                Ok(response)
+            }
+            AgentEnum::OpenAI(agent) => {
+                let response = agent.prompt(request).await?;
+                Ok(response)
+            }
+        }
     }
 
     /// 切换到指定的 Agent 类型
