@@ -39,6 +39,7 @@ dirs = "5.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 git2 = "0.19"
 tiktoken-rs = "0.5"
+nu-ansi-term = "0.50"
 
 [dev-dependencies]
 mockito = "1.4"

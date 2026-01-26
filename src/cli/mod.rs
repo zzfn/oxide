@@ -4,6 +4,7 @@ pub mod render;
 
 use anyhow::Result;
 use colored::*;
+use nu_ansi_term::{Color, Style};
 use inquire::Select;
 use reedline::{
     default_emacs_keybindings, Completer, DescriptionMode, EditCommand, Emacs, IdeMenu, KeyCode,
@@ -741,12 +742,16 @@ impl OxideCli {
         let edit_mode = Box::new(Emacs::new(keybindings));
         let completion_menu = IdeMenu::default()
             .with_name("oxide_completion")
-            .with_default_border()
             .with_description_mode(DescriptionMode::PreferRight)
             .with_max_completion_height(8)
             .with_max_description_height(6)
             .with_max_description_width(48)
-            .with_correct_cursor_pos(true);
+            .with_correct_cursor_pos(true)
+            .with_selected_text_style(Style::new().on(Color::Cyan).fg(Color::Black).bold()) // 选中项：青色背景+黑字 (实心高亮)
+            .with_text_style(Style::new().fg(Color::Fixed(252)))                             // 未选中项：接近纯白
+            .with_description_text_style(Style::new().fg(Color::Fixed(248)).italic())       // 描述：更浅的灰色+斜体
+            .with_match_text_style(Style::new().fg(Color::Green).underline())               // 匹配字：绿色下划线
+            .with_selected_match_text_style(Style::new().on(Color::Cyan).fg(Color::Black).underline().bold()); // 选中匹配：青底黑字+下划线
 
         let mut rl = Reedline::create()
             .with_edit_mode(edit_mode)
