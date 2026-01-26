@@ -8,6 +8,7 @@ use crate::tools::{
     WrappedCreateDirectoryTool, WrappedDeleteFileTool, WrappedEditFileTool,
     WrappedGlobTool, WrappedGrepSearchTool, WrappedReadFileTool,
     WrappedScanCodebaseTool, WrappedWriteFileTool, WrappedShellExecuteTool,
+    WrappedSearchReplaceTool,
 };
 use anyhow::Result;
 use rig::agent::Agent;
@@ -65,7 +66,7 @@ impl AgentBuilder {
 
             let agent = client
                 .agent(&model_name)
-                .preamble("Your name is Oxide. You are a helpful AI code assistant with comprehensive file system and command execution access. You can read, write, edit (with patches), and delete files, execute bash commands, scan codebase structures, search text in the codebase and create directories. Use the edit_file tool for making small, targeted changes to existing files - it's more efficient than rewriting entire files. Please provide clear and concise responses and be careful when modifying files or executing commands.")
+                .preamble("Your name is Oxide. You are a helpful AI code assistant with comprehensive file system and command execution access. You can read, write, edit (with patches or search/replace), and delete files, execute bash commands, scan codebase structures, search text in the codebase and create directories. Use edit_file for precise small changes with diffs. Use search_replace for block replacements where you match content rather than lines (robust to line number shifts). search_replace is preferred for modifying functions or blocks of code. Please provide clear and concise responses and be careful when modifying files or executing commands.")
                 .max_tokens(4096)
                 .tool(MaybeHitlTool::new(tools.read_file, self.hitl.clone()))
                 .tool(MaybeHitlTool::new(tools.write_file, self.hitl.clone()))
@@ -87,7 +88,7 @@ impl AgentBuilder {
 
             let agent = client
                 .agent(&model_name)
-                .preamble("Your name is Oxide. You are a helpful AI code assistant with comprehensive file system and command execution access. You can read, write, edit (with patches), and delete files, execute bash commands, scan codebase structures, search text in the codebase and create directories. Use the edit_file tool for making small, targeted changes to existing files - it's more efficient than rewriting entire files. Please provide clear and concise responses and be careful when modifying files or executing commands.")
+                .preamble("Your name is Oxide. You are a helpful AI code assistant with comprehensive file system and command execution access. You can read, write, edit (with patches or search/replace), and delete files, execute bash commands, scan codebase structures, search text in the codebase and create directories. Use edit_file for precise small changes with diffs. Use search_replace for block replacements where you match content rather than lines (robust to line number shifts). search_replace is preferred for modifying functions or blocks of code. Please provide clear and concise responses and be careful when modifying files or executing commands.")
                 .max_tokens(4096)
                 .tool(MaybeHitlTool::new(tools.read_file, self.hitl.clone()))
                 .tool(MaybeHitlTool::new(tools.write_file, self.hitl.clone()))
@@ -98,6 +99,7 @@ impl AgentBuilder {
                 .tool(MaybeHitlTool::new(tools.make_dir, self.hitl.clone()))
                 .tool(MaybeHitlTool::new(tools.grep_find, self.hitl.clone()))
                 .tool(MaybeHitlTool::new(tools.glob, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.search_replace, self.hitl.clone()))
                 .build();
 
             Ok(AgentEnum::OpenAI(agent))
@@ -259,7 +261,7 @@ impl AgentBuilder {
 
             let agent = client
                 .agent(&model_name)
-                .preamble("You are a Frontend Developer Agent specialized in building modern, production-grade user interfaces. Your expertise includes: - React, Next.js, Vue, Svelte, and other modern frameworks - Tailwind CSS, shadcn/ui, and component libraries - Responsive design and accessibility - Performance optimization - Creating polished, maintainable code that avoids generic AI aesthetics. When building UI components, prioritize user experience, maintainability, and web standards compliance.")
+                .preamble("You are a Frontend Developer Agent specialized in building modern, production-grade user interfaces. Your expertise includes: - React, Next.js, Vue, Svelte, and other modern frameworks - Tailwind CSS, shadcn/ui, and component libraries - Responsive design and accessibility - Performance optimization - Creating polished, maintainable code that avoids generic AI aesthetics. When building UI components, prioritize user experience, maintainability, and web standards compliance. Use search_replace for safe block replacements when strict line numbers are unknown.")
                 .max_tokens(4096)
                 .tool(tools.read_file)
                 .tool(tools.write_file)
@@ -278,7 +280,7 @@ impl AgentBuilder {
 
             let agent = client
                 .agent(&model_name)
-                .preamble("You are a Frontend Developer Agent specialized in building modern, production-grade user interfaces. Your expertise includes: - React, Next.js, Vue, Svelte, and other modern frameworks - Tailwind CSS, shadcn/ui, and component libraries - Responsive design and accessibility - Performance optimization - Creating polished, maintainable code that avoids generic AI aesthetics. When building UI components, prioritize user experience, maintainability, and web standards compliance.")
+                .preamble("You are a Frontend Developer Agent specialized in building modern, production-grade user interfaces. Your expertise includes: - React, Next.js, Vue, Svelte, and other modern frameworks - Tailwind CSS, shadcn/ui, and component libraries - Responsive design and accessibility - Performance optimization - Creating polished, maintainable code that avoids generic AI aesthetics. When building UI components, prioritize user experience, maintainability, and web standards compliance. Use search_replace for safe block replacements when strict line numbers are unknown.")
                 .max_tokens(4096)
                 .tool(tools.read_file)
                 .tool(tools.write_file)
@@ -286,6 +288,7 @@ impl AgentBuilder {
                 .tool(tools.shell_execute)
                 .tool(tools.grep_find)
                 .tool(tools.glob)
+                .tool(tools.search_replace)
                 .build();
 
             Ok(AgentEnum::OpenAI(agent))
@@ -317,6 +320,7 @@ impl AgentBuilder {
             make_dir: WrappedCreateDirectoryTool::new(),
             grep_find: WrappedGrepSearchTool::new(),
             glob: WrappedGlobTool::new(),
+            search_replace: WrappedSearchReplaceTool::new(),
         };
 
         // 如果启用了 HITL，则包装工具
@@ -342,6 +346,7 @@ struct AllTools {
     make_dir: WrappedCreateDirectoryTool,
     grep_find: WrappedGrepSearchTool,
     glob: WrappedGlobTool,
+    search_replace: WrappedSearchReplaceTool,
 }
 
 /// Agent 枚举 - 支持多种客户端

@@ -30,6 +30,7 @@ pub mod notebook_edit;
 pub mod read_file;
 pub mod scan_codebase;
 pub mod write_file;
+pub mod search_replace;
 pub mod shell_execute;
 pub mod task;
 pub mod task_output;
@@ -43,6 +44,7 @@ pub use read_file::WrappedReadFileTool;
 pub use scan_codebase::WrappedScanCodebaseTool;
 pub use write_file::WrappedWriteFileTool;
 pub use shell_execute::WrappedShellExecuteTool;
+pub use search_replace::WrappedSearchReplaceTool;
 
 // task 和 task_output 模块暂未集成到主 Agent
 // 这些工具将在未来版本中使用

@@ -20,7 +20,6 @@ use crate::agent::HitlIntegration;
 use crate::skill::SkillManager;
 use std::sync::Arc;
 use names::Generator;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load config

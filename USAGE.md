@@ -84,12 +84,14 @@ Oxide CLI 支持 AI 回复的实时 Markdown 渲染，包括：
 **问题：启动时报错 "未找到 OXIDE_AUTH_TOKEN 环境变量"**
 
 解决方案：
+
 1. 设置环境变量：`export OXIDE_AUTH_TOKEN=your_key`
 2. 或创建 `.env` 文件并添加：`OXIDE_AUTH_TOKEN=your_key`
 
 **问题：打字机效果过慢或过快**
 
 解决方案：
+
 - 设置 `STREAM_CHARS_PER_TICK` 调整流式速度（例如 `export STREAM_CHARS_PER_TICK=12`）
 
 ### 网络问题
@@ -97,6 +99,7 @@ Oxide CLI 支持 AI 回复的实时 Markdown 渲染，包括：
 **问题：API 请求超时**
 
 解决方案：
+
 - 检查网络连接
 - 确认能够访问配置的 `base_url`
 - 如果使用代理，请配置环境变量
@@ -106,12 +109,14 @@ Oxide CLI 支持 AI 回复的实时 Markdown 渲染，包括：
 **问题：颜色显示异常**
 
 解决方案：
+
 - 确保终端支持 ANSI 颜色代码
 - 某些终端可能需要启用颜色支持
 
 **问题：Markdown 格式显示异常**
 
 解决方案：
+
 - Oxide 使用 `termimad` 库渲染 Markdown
 - 确保终端宽度足够（建议 80 列以上）
 - 如果表格格式错位，这是正常现象（表格以原始文本显示）

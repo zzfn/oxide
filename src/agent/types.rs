@@ -129,6 +129,7 @@ impl AgentCapability {
                 "scan_codebase".to_string(),
                 "create_directory".to_string(),
                 "grep_search".to_string(),
+                "search_replace".to_string(),
             ],
             system_prompt: r#"
 Your name is Oxide. You are a helpful AI code assistant with comprehensive file system and command execution access.
@@ -171,6 +172,16 @@ Example workflow for editing a file:
 3. Create a unified diff patch with proper context
 4. Apply the patch using edit_file
 5. If it fails, read the error message and adjust
+6. Alternatively, use search_replace for block modifications
+
+═══════════════════════════════════════════════════════════════════════════
+🔧 search_replace Tool Usage
+═══════════════════════════════════════════════════════════════════════════
+Use search_replace when:
+- Replace a specific block of code (function, class, etc.)
+- Line numbers are uncertain (robust to shifts)
+- Content match is unique
+It supports exact matching and robust matching (ignoring indentation).
 
 Please provide clear and concise responses and be careful when modifying files or executing commands.
 "#.trim().to_string(),
@@ -265,6 +276,7 @@ Focus on high-priority issues that truly matter. Be constructive and specific in
                 "write_file".to_string(),
                 "edit_file".to_string(),
                 "shell_execute".to_string(),
+                "search_replace".to_string(),
             ],
             system_prompt: r#"
 You are a Frontend Developer Agent specialized in building modern, production-grade user interfaces.
@@ -303,6 +315,16 @@ Your expertise includes:
    - 仔细阅读错误诊断信息
    - 使用 Read 工具重新确认文件内容
    - 重新生成正确的 patch
+6. Alternatively, use search_replace for block modifications
+
+═══════════════════════════════════════════════════════════════════════════
+🔧 search_replace Tool Usage
+═══════════════════════════════════════════════════════════════════════════
+Use search_replace when:
+- Replace a specific block of code (function, class, etc.)
+- Line numbers are uncertain
+- Content match is unique
+It supports exact matching and robust matching (ignoring indentation).
 
 ═══════════════════════════════════════════════════════════════════════════
 
