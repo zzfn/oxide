@@ -252,6 +252,19 @@ where
                 final_res = res;
             }
             Err(err) => {
+                let err_msg = err.to_string();
+                if err_msg.contains("PromptCancelled") {
+                    if let Some(tx) = stop_spinner_tx.take() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(handle) = spinner_handle.take() {
+                        let _ = handle.await;
+                    }
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "prompt_cancelled",
+                    ));
+                }
                 eprintln!("Error: {}", err);
             }
             _ => {}

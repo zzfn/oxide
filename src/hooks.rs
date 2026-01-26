@@ -30,9 +30,12 @@ impl<M: CompletionModel> StreamingPromptHook<M> for SessionIdHook {
         _tool_name: &str,
         _tool_call_id: Option<String>,
         _args: &str,
-        _result: &str,
-        _cancel_sig: CancelSignal,
+        result: &str,
+        cancel_sig: CancelSignal,
     ) {
+        if result.contains("Operation cancelled by user") {
+            cancel_sig.cancel();
+        }
     }
 
     async fn on_completion_call(

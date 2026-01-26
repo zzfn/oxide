@@ -231,11 +231,17 @@ impl OxideCli {
                         self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
                     }
                     Err(e) => {
-                        println!("{} Failed to get AI response: {}", "❌".red(), e);
-                        println!(
-                            "{} Please check your API key and network connection",
-                            "💡".bright_blue()
-                        );
+                        if e.kind() == std::io::ErrorKind::Interrupted
+                            && e.to_string().contains("prompt_cancelled")
+                        {
+                            println!("{} 操作已取消", "🚫".red());
+                        } else {
+                            println!("{} Failed to get AI response: {}", "❌".red(), e);
+                            println!(
+                                "{} Please check your API key and network connection",
+                                "💡".bright_blue()
+                            );
+                        }
                     }
                 }
             }
@@ -1322,7 +1328,13 @@ impl OxideCli {
                 self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
             }
             Err(e) => {
-                println!("{} Failed to get AI response: {}", "❌".red(), e);
+                if e.kind() == std::io::ErrorKind::Interrupted
+                    && e.to_string().contains("prompt_cancelled")
+                {
+                    println!("{} 操作已取消", "🚫".red());
+                } else {
+                    println!("{} Failed to get AI response: {}", "❌".red(), e);
+                }
             }
         }
 
