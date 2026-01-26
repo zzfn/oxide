@@ -336,9 +336,6 @@ impl Tool for WrappedMultiEditTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::write;
-    use std::path::PathBuf;
-    use tempfile::TempDir;
 
     #[test]
     fn test_edit_operation_serialization() {

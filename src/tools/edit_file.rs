@@ -243,8 +243,6 @@ pub struct EditFileOutput {
     pub message: String,
     /// 预览内容（如果生成了的话）
     pub preview: Option<String>,
-    /// 是否被用户取消
-    pub cancelled: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -414,7 +412,6 @@ impl Tool for EditFileTool {
                     args.file_path, lines_added, lines_removed
                 ),
                 preview: None,
-                cancelled: false,
             }),
             Err(e) => match e.kind() {
                 std::io::ErrorKind::PermissionDenied => {
@@ -602,22 +599,13 @@ impl Tool for WrappedEditFileTool {
                                     args.file_path, lines_added, lines_removed
                                 ),
                                 preview: Some(preview),
-                                cancelled: false,
                             })
                         }
                         Ok(false) => {
                             // 用户取消
                             println!("  └─ {}", "修改已取消".bright_yellow());
                             println!();
-                            Ok(EditFileOutput {
-                                file_path: args.file_path.clone(),
-                                lines_added,
-                                lines_removed,
-                                success: false,
-                                message: "用户取消了修改。请不要重试此操作，除非用户明确要求。".to_string(),
-                                preview: Some(preview),
-                                cancelled: true,
-                            })
+                            Err(FileToolError::Cancelled)
                         }
                         Err(e) => {
                             println!("  └─ {}", format!("读取输入错误: {}", e).red());
