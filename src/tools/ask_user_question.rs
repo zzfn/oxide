@@ -164,17 +164,6 @@ impl AskUserQuestionTool {
         println!("{}", question.question.white());
         println!();
 
-        for (index, option) in question.options.iter().enumerate() {
-            println!(
-                "  {} {}. {} - {}",
-                "›".bright_cyan(),
-                (index + 1).to_string().bright_yellow(),
-                option.label.bright_white(),
-                option.description.dimmed()
-            );
-        }
-        println!();
-
         let display_items: Vec<String> = question
             .options
             .iter()
@@ -182,7 +171,8 @@ impl AskUserQuestionTool {
             .collect();
 
         if question.multi_select {
-            let selection = MultiSelect::new("使用上下键选择，空格勾选，回车确认", display_items)
+            let selection = MultiSelect::new("请选择", display_items)
+                .with_help_message("↑↓移动，Space选择，Enter确认")
                 .prompt();
 
             match selection {
@@ -209,7 +199,9 @@ impl AskUserQuestionTool {
             }
         } else {
             let selection =
-                Select::new("使用上下键选择，然后回车确认", display_items).prompt();
+                Select::new("请选择", display_items)
+                .with_help_message("↑↓移动，Enter确认，可输入筛选")
+                .prompt();
 
             match selection {
                 Ok(item) => Ok(Answer {
