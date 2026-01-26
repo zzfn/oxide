@@ -554,6 +554,7 @@ pub const LOGO: &str = r#"
 (_______)|/     \|\_______/(______/ (_______/
 "#;
 
+use crate::agent::HitlIntegration;
 use crate::agent::AgentType;
 use crate::cli::render::Spinner;
 
@@ -562,6 +563,7 @@ pub struct OxideCli {
     pub model_name: String,
     pub agent: AgentType,
     pub context_manager: ContextManager,
+    pub _hitl: Arc<HitlIntegration>,
     prompt_label: PromptLabel,
     spinner: Spinner,
     total_tokens: Arc<AtomicU64>,
@@ -573,12 +575,14 @@ impl OxideCli {
         model_name: String,
         agent: AgentType,
         context_manager: ContextManager,
+        hitl: Arc<HitlIntegration>,
     ) -> Self {
         Self {
             api_key,
             model_name,
             agent,
             context_manager,
+            _hitl: hitl,
             prompt_label: PromptLabel::Oxide,
             spinner: Spinner::new(),
             total_tokens: Arc::new(AtomicU64::new(0)),

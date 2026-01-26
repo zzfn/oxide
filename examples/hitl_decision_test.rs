@@ -2,7 +2,7 @@
 //!
 //! 可视化展示 HITL Gatekeeper 的决策流程
 
-use oxide::agent::{HitlGatekeeper, HitlConfig, ToolCallRequest, build_operation_context};
+use oxide::agent::{HitlGatekeeper, HitlConfig, ToolCallRequest, build_operation_context, HitlDecision, WarningLevel};
 use colored::*;
 
 #[tokio::main]
@@ -160,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // 显示决策结果
         match decision {
-            oxide::agent::hitl_gatekeeper::HitlDecision::ExecuteDirectly { reason } => {
+            HitlDecision::ExecuteDirectly { reason } => {
                 println!("  {} 决策: {}", "✅".bright_green(), "自动执行".bright_green().bold());
                 println!("  {} 理由: {}", "📝".dimmed(), reason.dimmed());
 
@@ -173,13 +173,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            oxide::agent::hitl_gatekeeper::HitlDecision::RequireConfirmation { reason, warning_level } => {
+            HitlDecision::RequireConfirmation { reason, warning_level } => {
                 let icon = match warning_level {
-                    oxide::agent::hitl_gatekeeper::WarningLevel::Info => "ℹ️",
-                    oxide::agent::hitl_gatekeeper::WarningLevel::Low => "⚠️",
-                    oxide::agent::hitl_gatekeeper::WarningLevel::Medium => "⚠️",
-                    oxide::agent::hitl_gatekeeper::WarningLevel::High => "🚨",
-                    oxide::agent::hitl_gatekeeper::WarningLevel::Critical => "🔴",
+                    WarningLevel::Info => "ℹ️",
+                    WarningLevel::Low => "⚠️",
+                    WarningLevel::Medium => "⚠️",
+                    WarningLevel::High => "🚨",
+                    WarningLevel::Critical => "🔴",
                 };
 
                 println!("  {} 决策: {}", "⏸️".bright_yellow(), "需要确认".bright_yellow().bold());
@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            oxide::agent::hitl_gatekeeper::HitlDecision::Reject { reason, suggestion } => {
+            HitlDecision::Reject { reason, suggestion } => {
                 println!("  {} 决策: {}", "🛑".bright_red(), "拒绝执行".bright_red().bold());
                 println!("  {} 理由: {}", "📝".dimmed(), reason.dimmed());
                 if let Some(suggestion) = suggestion {
@@ -211,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            oxide::agent::hitl_gatekeeper::HitlDecision::RequireChoice { question, options, .. } => {
+            HitlDecision::RequireChoice { question, options, .. } => {
                 println!("  {} 决策: {}", "❓".bright_blue(), "需要选择".bright_blue().bold());
                 println!("  {} 问题: {}", "📝".dimmed(), question.dimmed());
                 println!("  {} 选项:", "📋".dimmed());

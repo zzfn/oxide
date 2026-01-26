@@ -11,7 +11,7 @@ use ignore::WalkBuilder;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct GrepSearchArgs {
     pub root_path: String,
     pub query: String,

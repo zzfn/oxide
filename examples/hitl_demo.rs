@@ -2,8 +2,7 @@
 //!
 //! 展示如何在工具调用中集成 HITL 功能
 
-use oxide::agent::{HitlIntegration, HitlResult, build_operation_context};
-use oxide::agent::hitl_gatekeeper::ToolCallRequest;
+use oxide::agent::{HitlIntegration, HitlResult, build_operation_context, ToolCallRequest};
 use colored::*;
 
 #[tokio::main]

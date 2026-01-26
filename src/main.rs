@@ -16,7 +16,9 @@ use config::Config;
 use crate::agent::AgentBuilder;
 use crate::cli::OxideCli;
 use crate::context::ContextManager;
+use crate::agent::HitlIntegration;
 use crate::skill::SkillManager;
+use std::sync::Arc;
 use names::Generator;
 
 #[tokio::main]
@@ -31,12 +33,16 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
+    // Initialize HITL
+    let hitl = Arc::new(HitlIntegration::new()?);
+
     // Create Agent using AgentBuilder
     let builder = AgentBuilder::new(
         config.base_url.clone(),
         config.auth_token.clone(),
         config.model.clone(),
-    );
+    ).with_hitl(hitl.clone());
+    
     let agent = builder.build_main().context("Failed to create agent")?;
 
     #[cfg(feature = "cli")]
@@ -61,6 +67,7 @@ async fn main() -> Result<()> {
             config.model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
             agent,
             context_manager,
+            hitl,
         );
 
         cli.run().await?;

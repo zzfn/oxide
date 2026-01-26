@@ -2,6 +2,7 @@
 //!
 //! 根据不同的 Agent 类型创建具有相应工具权限的 Agent 实例。
 
+use crate::agent::{HitlIntegration, MaybeHitlTool};
 use crate::agent::types::AgentType;
 use crate::tools::{
     WrappedCreateDirectoryTool, WrappedDeleteFileTool, WrappedEditFileTool,
@@ -12,6 +13,7 @@ use anyhow::Result;
 use rig::agent::Agent;
 use rig::client::CompletionClient;
 use rig::providers::{anthropic, openai};
+use std::sync::Arc;
 
 /// Agent 构建器
 ///
@@ -25,6 +27,9 @@ pub struct AgentBuilder {
 
     /// 模型名称(可选)
     model: Option<String>,
+
+    /// HITL 集成 (可选)
+    hitl: Option<Arc<HitlIntegration>>,
 }
 
 impl AgentBuilder {
@@ -34,7 +39,14 @@ impl AgentBuilder {
             base_url,
             auth_token,
             model,
+            hitl: None,
         }
+    }
+
+    /// 设置 HITL 集成
+    pub fn with_hitl(mut self, hitl: Arc<HitlIntegration>) -> Self {
+        self.hitl = Some(hitl);
+        self
     }
 
     /// 构建 Main Agent(拥有所有工具)
@@ -55,15 +67,15 @@ impl AgentBuilder {
                 .agent(&model_name)
                 .preamble("Your name is Oxide. You are a helpful AI code assistant with comprehensive file system and command execution access. You can read, write, edit (with patches), and delete files, execute bash commands, scan codebase structures, search text in the codebase and create directories. Use the edit_file tool for making small, targeted changes to existing files - it's more efficient than rewriting entire files. Please provide clear and concise responses and be careful when modifying files or executing commands.")
                 .max_tokens(4096)
-                .tool(tools.read_file)
-                .tool(tools.write_file)
-                .tool(tools.edit_file)
-                .tool(tools.delete_file)
-                .tool(tools.shell_execute)
-                .tool(tools.scan_codebase)
-                .tool(tools.make_dir)
-                .tool(tools.grep_find)
-                .tool(tools.glob)
+                .tool(MaybeHitlTool::new(tools.read_file, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.write_file, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.edit_file, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.delete_file, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.shell_execute, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.scan_codebase, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.make_dir, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.grep_find, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.glob, self.hitl.clone()))
                 .build();
 
             Ok(AgentEnum::Anthropic(agent))
@@ -77,15 +89,15 @@ impl AgentBuilder {
                 .agent(&model_name)
                 .preamble("Your name is Oxide. You are a helpful AI code assistant with comprehensive file system and command execution access. You can read, write, edit (with patches), and delete files, execute bash commands, scan codebase structures, search text in the codebase and create directories. Use the edit_file tool for making small, targeted changes to existing files - it's more efficient than rewriting entire files. Please provide clear and concise responses and be careful when modifying files or executing commands.")
                 .max_tokens(4096)
-                .tool(tools.read_file)
-                .tool(tools.write_file)
-                .tool(tools.edit_file)
-                .tool(tools.delete_file)
-                .tool(tools.shell_execute)
-                .tool(tools.scan_codebase)
-                .tool(tools.make_dir)
-                .tool(tools.grep_find)
-                .tool(tools.glob)
+                .tool(MaybeHitlTool::new(tools.read_file, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.write_file, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.edit_file, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.delete_file, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.shell_execute, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.scan_codebase, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.make_dir, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.grep_find, self.hitl.clone()))
+                .tool(MaybeHitlTool::new(tools.glob, self.hitl.clone()))
                 .build();
 
             Ok(AgentEnum::OpenAI(agent))
@@ -295,7 +307,7 @@ impl AgentBuilder {
 
     /// 创建所有可用的工具
     fn create_tools(&self) -> AllTools {
-        AllTools {
+        let tools = AllTools {
             read_file: WrappedReadFileTool::new(),
             write_file: WrappedWriteFileTool::new(),
             edit_file: WrappedEditFileTool::new(),
@@ -305,7 +317,17 @@ impl AgentBuilder {
             make_dir: WrappedCreateDirectoryTool::new(),
             grep_find: WrappedGrepSearchTool::new(),
             glob: WrappedGlobTool::new(),
+        };
+
+        // 如果启用了 HITL，则包装工具
+        if let Some(_hitl) = &self.hitl {
+            // 注意：这里由于类型不同，不能简单的重新赋值，除非 AllTools 也支持泛型包装器。
+            // 为了简化实现，我们暂且认为只有 Main Agent 环境会启用 HITL，
+            // 且我们只包装那些高风险工具。
+            // 在实际代码中，这可能需要更复杂的泛型处理或 trait object。
         }
+
+        tools
     }
 }
 

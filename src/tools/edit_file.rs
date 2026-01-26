@@ -227,7 +227,7 @@ fn normalize_patch_for_parse<'a>(patch_str: &'a str) -> Result<Cow<'a, str>, Fil
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct EditFileArgs {
     pub file_path: String,
     pub patch: String,
@@ -614,7 +614,7 @@ impl Tool for WrappedEditFileTool {
                                 file_path: args.file_path.clone(),
                                 lines_added,
                                 lines_removed,
-                                success: true,
+                                success: false,
                                 message: "用户取消了修改".to_string(),
                                 preview: Some(preview),
                                 cancelled: true,

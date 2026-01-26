@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Glob 工具输入
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct GlobInput {
     /// 模式（例如 "**/*.rs", "src/**/*.toml"）
     pub pattern: String,

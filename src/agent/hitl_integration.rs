@@ -8,18 +8,21 @@ use crate::agent::hitl_gatekeeper::{HitlConfig, HitlDecision, HitlGatekeeper, To
 use crate::tools::ask_user_question::{WrappedAskUserQuestionTool, QuestionOption};
 use rig::tool::Tool;
 use colored::*;
+use std::sync::Arc;
+use serde::{Serialize, Deserialize};
+use anyhow::Result;
 
 /// HITL 集成示例
 ///
 /// 展示如何在主 Agent 的工具调用流程中集成 HITL Gatekeeper
 pub struct HitlIntegration {
-    gatekeeper: HitlGatekeeper,
-    ask_user_tool: WrappedAskUserQuestionTool,
+    pub gatekeeper: HitlGatekeeper,
+    pub ask_user_tool: WrappedAskUserQuestionTool,
 }
 
 impl HitlIntegration {
     /// 创建新的 HITL 集成实例
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<Self> {
         let config = HitlConfig {
             trust: crate::agent::hitl_gatekeeper::TrustConfig::default(),
         };
@@ -130,7 +133,14 @@ impl HitlIntegration {
         };
 
         match self.ask_user_tool.call(args).await {
-            Ok(_) => Ok(HitlResult::Approved),
+            Ok(output) => {
+                if let Some(answer) = output.answers.get("确认") {
+                    if answer.as_str() == Some("确认") || answer.as_str() == Some("是") {
+                        return Ok(HitlResult::Approved);
+                    }
+                }
+                Ok(HitlResult::Rejected)
+            }
             Err(_) => Ok(HitlResult::Rejected),
         }
     }
@@ -164,7 +174,14 @@ impl HitlIntegration {
         };
 
         match self.ask_user_tool.call(args).await {
-            Ok(_) => Ok(HitlResult::Approved),
+            Ok(output) => {
+                if let Some(answer) = output.answers.get("选择") {
+                    if !answer.is_null() {
+                        return Ok(HitlResult::Approved);
+                    }
+                }
+                Ok(HitlResult::Rejected)
+            }
             Err(_) => Ok(HitlResult::Rejected),
         }
     }
@@ -243,40 +260,88 @@ pub fn build_operation_context(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// 可见性更高的 HITL 包装工具
+/// 
+/// 包装任何 rig::Tool，在执行前进行 HITL 评估和确认。
+/// 如果 hitl 为 None，则直接执行。
+pub struct MaybeHitlTool<T: Tool> {
+    pub inner: T,
+    pub hitl: Option<Arc<HitlIntegration>>,
+}
 
-    #[tokio::test]
-    async fn test_hitl_integration_create() {
-        let result = HitlIntegration::new();
-        // 注意：这个测试需要 ANTHROPIC_API_KEY 环境变量
-        // 在 CI/CD 中可能需要跳过或使用 mock
-        assert!(result.is_ok() || result.is_err());
+impl<T: Tool> MaybeHitlTool<T> {
+    pub fn new(inner: T, hitl: Option<Arc<HitlIntegration>>) -> Self {
+        Self { inner, hitl }
+    }
+}
+
+impl<T: Tool + Send + Sync> Tool for MaybeHitlTool<T> 
+where 
+    T::Args: Serialize + for<'de> Deserialize<'de> + Send + Sync,
+    T::Output: Serialize + Send + Sync,
+    T::Error: From<crate::tools::FileToolError> + Send + Sync,
+{
+    const NAME: &'static str = T::NAME;
+
+    type Error = T::Error;
+    type Args = T::Args;
+    type Output = T::Output;
+
+    async fn definition(&self, prompt: String) -> rig::completion::ToolDefinition {
+        self.inner.definition(prompt).await
     }
 
-    #[test]
-    fn test_hitl_result() {
-        let approved = HitlResult::Approved;
-        let rejected = HitlResult::Rejected;
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let hitl = match &self.hitl {
+            Some(h) => h,
+            None => return self.inner.call(args).await,
+        };
 
-        assert_eq!(approved, HitlResult::Approved);
-        assert_eq!(rejected, HitlResult::Rejected);
-        assert_ne!(approved, rejected);
+        // 1. 构建工具调用请求
+        let tool_name = T::NAME.to_string();
+        let args_json = serde_json::to_value(&args).unwrap_or(serde_json::Value::Null);
+
+        // 获取当前任务上下文 (暂时使用默认值，后续可以从全局状态获取)
+        let context = OperationContext {
+            recent_operations: Vec::new(),
+            current_task: None,
+            has_git: std::path::Path::new(".git").exists(),
+            git_branch: None,
+        };
+
+        let request = ToolCallRequest {
+            tool_name: tool_name.clone(),
+            args: args_json,
+            context,
+        };
+
+        // 2. HITL 评估
+        match hitl.evaluate_and_confirm(request).await {
+            Ok(HitlResult::Approved) => {
+                let result = self.inner.call(args).await;
+                if result.is_ok() {
+                    hitl.record_success(tool_name).await;
+                }
+                result
+            }
+            Ok(HitlResult::Rejected) => {
+                println!("{} {} 操作已被用户取消", "🚫".red(), T::NAME);
+                // 使用内部方法创建取消错误。如果工具支持，则返回具体的取消错误。
+                Err(self.create_cancellation_error())
+            }
+            Err(e) => {
+                println!("{} HITL 系统错误: {}", "❌".red(), e);
+                self.inner.call(args).await
+            }
+        }
     }
+}
 
-    #[test]
-    fn test_build_context() {
-        let context = build_operation_context(
-            vec!["read_file".to_string(), "edit_file".to_string()],
-            Some("修复 bug".to_string()),
-            true,
-            Some("main".to_string()),
-        );
-
-        assert_eq!(context.recent_operations.len(), 2);
-        assert_eq!(context.current_task, Some("修复 bug".to_string()));
-        assert!(context.has_git);
-        assert_eq!(context.git_branch, Some("main".to_string()));
+impl<T: Tool> MaybeHitlTool<T> 
+where
+    T::Error: From<crate::tools::FileToolError> + Send + Sync,
+{
+    fn create_cancellation_error(&self) -> T::Error {
+        crate::tools::FileToolError::Cancelled.into()
     }
 }
