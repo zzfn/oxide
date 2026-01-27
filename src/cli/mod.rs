@@ -68,7 +68,7 @@ fn build_commands() -> HashMap<String, CommandInfo> {
     );
     commands.insert(
         "/agent".to_string(),
-        CommandInfo::new("/agent [list|switch <type>]", "管理 Agent 类型"),
+        CommandInfo::new("/agent [list|capabilities]", "查看 Agent 类型与能力"),
     );
     commands.insert(
         "/tasks".to_string(),

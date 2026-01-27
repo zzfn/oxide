@@ -9,7 +9,6 @@ use colored::*;
 use rig::completion::Message;
 use rig::streaming::StreamingPrompt;
 use std::io::{stdout, Write};
-use std::str::FromStr;
 
 use super::render::stream_with_animation;
 use super::OxideCli;
@@ -67,16 +66,12 @@ impl OxideCli {
             "/agent" | "/agent list" => {
                 self.list_agents()?;
             }
-            _ if input.starts_with("/agent switch ") => {
-                let agent_type = input.strip_prefix("/agent switch ").unwrap_or("").trim();
-                self.switch_agent(agent_type)?;
-            }
             _ if input.starts_with("/agent capabilities") => {
                 self.show_agent_capabilities()?;
             }
             _ if input.starts_with("/agent ") => {
                 println!("{} Unknown /agent subcommand", "❌".red());
-                println!("{} Usage: /agent [list|switch <type>|capabilities]", "💡".bright_blue());
+                println!("{} Usage: /agent [list|capabilities]", "💡".bright_blue());
             }
             "/tasks" | "/tasks list" => {
                 self.list_tasks()?;
@@ -480,7 +475,7 @@ impl OxideCli {
             "  {} - Delete a specific session",
             "/delete <session_id>".bright_green()
         );
-        println!("  {} - List or switch Agent types", "/agent [list|switch <type>|capabilities]".bright_green());
+        println!("  {} - List Agent types or show capabilities", "/agent [list|capabilities]".bright_green());
         println!("  {} - Manage background tasks", "/tasks [list|show <id>|cancel <id>]".bright_green());
         println!("  {} - Manage and use skills", "/skills [list|show <name>]".bright_green());
         println!("  {} - Show this help message", "/help".bright_green());
@@ -546,9 +541,9 @@ impl OxideCli {
         println!("    {}", "/sessions".dimmed());
         println!("    {}", "/load abc123".dimmed());
         println!();
-        println!("  {}", "Agent Switching:".bright_yellow());
+        println!("  {}", "Agent Commands:".bright_yellow());
         println!("    {}", "/agent list".dimmed());
-        println!("    {}", "/agent switch explore".dimmed());
+        println!("    {}", "/agent capabilities".dimmed());
         println!();
         println!("  {}", "Configuration:".bright_yellow());
         println!("    {}", "/config show".dimmed());
@@ -576,7 +571,7 @@ impl OxideCli {
         );
         println!(
             "{}",
-            "🤖 Use different agents for specific tasks (explore, plan, code_reviewer)".bright_blue()
+            "🤖 主 Agent 为单实例，不支持手动切换；子 Agent 仅供内部调用".bright_blue()
         );
         println!(
             "{}",
@@ -800,49 +795,10 @@ impl OxideCli {
         }
 
         println!(
-            "{} Use '/agent switch <type>' to change agent type",
+            "{} 使用 '/agent capabilities' 查看能力",
             "💡".bright_blue()
         );
         println!();
-        Ok(())
-    }
-
-    fn switch_agent(&mut self, agent_type_str: &str) -> Result<()> {
-        // 解析 Agent 类型
-        let agent_type = match NewAgentType::from_str(agent_type_str) {
-            Ok(t) => t,
-            Err(_) => {
-                println!("{} Unknown agent type: {}", "❌".red(), agent_type_str);
-                println!("{} Available types:", "💡".bright_blue());
-                println!("  - main (Main Agent)");
-                println!("  - explore (Explore Agent)");
-                println!("  - plan (Plan Agent)");
-                println!("  - code_reviewer (Code Reviewer Agent)");
-                println!("  - frontend_developer (Frontend Developer Agent)");
-                println!();
-                return Ok(());
-            }
-        };
-
-        // TODO: 实际切换 Agent 逻辑
-        // 目前需要使用 AgentBuilder 重新构建 Agent
-        // 这需要存储 base_url 和 auth_token
-
-        println!(
-            "{} Switched to {} Agent",
-            "✅".bright_green(),
-            agent_type.display_name().bright_cyan()
-        );
-        println!(
-            "{} Note: Agent switching is not fully implemented yet.",
-            "⚠️".yellow()
-        );
-        println!(
-            "{} The current agent type has been noted but the agent has not been rebuilt.",
-            "💡".bright_blue()
-        );
-        println!();
-
         Ok(())
     }
 
