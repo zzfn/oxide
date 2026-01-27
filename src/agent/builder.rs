@@ -4,6 +4,7 @@
 
 use crate::agent::{HitlIntegration, MaybeHitlTool};
 use crate::agent::types::AgentType;
+use crate::config::secret::Secret;
 use crate::tools::{
     WrappedCreateDirectoryTool, WrappedDeleteFileTool, WrappedEditFileTool,
     WrappedGlobTool, WrappedGrepSearchTool, WrappedReadFileTool,
@@ -25,8 +26,8 @@ pub struct AgentBuilder {
     /// API 基础 URL
     base_url: String,
 
-    /// API 认证令牌
-    auth_token: String,
+    /// API 认证令牌 (使用 Secret 保护)
+    auth_token: Secret<String>,
 
     /// 模型名称(可选)
     model: Option<String>,
@@ -40,7 +41,7 @@ pub struct AgentBuilder {
 
 impl AgentBuilder {
     /// 创建新的 Agent 构建器
-    pub fn new(base_url: String, auth_token: String, model: Option<String>) -> Self {
+    pub fn new(base_url: String, auth_token: Secret<String>, model: Option<String>) -> Self {
         Self {
             base_url,
             auth_token,
@@ -72,7 +73,7 @@ impl AgentBuilder {
 
         if self.base_url.contains("/anthropic") || self.base_url.contains("anthropic.com") {
             let client = anthropic::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -94,7 +95,7 @@ impl AgentBuilder {
             Ok(AgentEnum::Anthropic(agent))
         } else {
             let client = openai::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -129,7 +130,7 @@ impl AgentBuilder {
 
         if self.base_url.contains("/anthropic") || self.base_url.contains("anthropic.com") {
             let client = anthropic::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -146,7 +147,7 @@ impl AgentBuilder {
             Ok(AgentEnum::Anthropic(agent))
         } else {
             let client = openai::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -175,7 +176,7 @@ impl AgentBuilder {
 
         if self.base_url.contains("/anthropic") || self.base_url.contains("anthropic.com") {
             let client = anthropic::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -192,7 +193,7 @@ impl AgentBuilder {
             Ok(AgentEnum::Anthropic(agent))
         } else {
             let client = openai::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -221,7 +222,7 @@ impl AgentBuilder {
 
         if self.base_url.contains("/anthropic") || self.base_url.contains("anthropic.com") {
             let client = anthropic::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -238,7 +239,7 @@ impl AgentBuilder {
             Ok(AgentEnum::Anthropic(agent))
         } else {
             let client = openai::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -267,7 +268,7 @@ impl AgentBuilder {
 
         if self.base_url.contains("/anthropic") || self.base_url.contains("anthropic.com") {
             let client = anthropic::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -286,7 +287,7 @@ impl AgentBuilder {
             Ok(AgentEnum::Anthropic(agent))
         } else {
             let client = openai::Client::builder()
-                .api_key(&self.auth_token)
+                .api_key(self.auth_token.expose_secret())
                 .base_url(&self.base_url)
                 .build()?;
 
@@ -372,12 +373,22 @@ pub enum AgentEnum {
     OpenAI(Agent<openai::responses_api::ResponsesCompletionModel>),
 }
 
+// 手动实现 Debug，避免暴露内部 Agent 细节
+impl std::fmt::Debug for AgentEnum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentEnum::Anthropic(_) => f.debug_tuple("AgentEnum::Anthropic").field(&"...").finish(),
+            AgentEnum::OpenAI(_) => f.debug_tuple("AgentEnum::OpenAI").field(&"...").finish(),
+        }
+    }
+}
+
 /// 便捷函数:创建指定类型的 Agent
 #[allow(dead_code)]
 pub fn create_agent_of_type(
     agent_type: AgentType,
     base_url: String,
-    auth_token: String,
+    auth_token: Secret<String>,
     model: Option<String>,
 ) -> Result<AgentEnum> {
     let builder = AgentBuilder::new(base_url, auth_token, model);
@@ -392,12 +403,12 @@ mod tests {
     fn test_agent_builder_creation() {
         let builder = AgentBuilder::new(
             "https://api.anthropic.com".to_string(),
-            "test-key".to_string(),
+            Secret::new("test-key".to_string()),
             None,
         );
 
         assert_eq!(builder.base_url, "https://api.anthropic.com");
-        assert_eq!(builder.auth_token, "test-key");
+        assert_eq!(builder.auth_token.expose_secret(), "test-key");
         assert!(builder.model.is_none());
     }
 
@@ -405,7 +416,7 @@ mod tests {
     fn test_agent_builder_with_custom_model() {
         let builder = AgentBuilder::new(
             "https://api.anthropic.com".to_string(),
-            "test-key".to_string(),
+            Secret::new("test-key".to_string()),
             Some("claude-opus-4-20250514".to_string()),
         );
 

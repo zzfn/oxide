@@ -1,4 +1,5 @@
 use crate::agent::{AgentType, NewAgentType, SubagentManager};
+use crate::agent::workflow::WorkflowExecutor;
 use crate::context::SerializableMessage;
 use crate::hooks::SessionIdHook;
 use crate::skill::{SkillExecutor, SkillManager};
@@ -99,6 +100,34 @@ impl OxideCli {
                 println!("{} Unknown /skills subcommand", "❌".red());
                 println!("{} Usage: /skills [list|show <name>]", "💡".bright_blue());
             }
+            "/workflow" | "/workflow status" => {
+                self.show_workflow_status()?;
+            }
+            _ if input.starts_with("/workflow on") || input.starts_with("/workflow enable") => {
+                println!("{}", "🔄 工作流自动模式已启用".bright_green());
+                println!("{}", "💡 复杂任务将自动使用 PAOR 工作流".bright_cyan());
+                println!("{}", "   使用 #workflow 标记强制启用".dimmed());
+                println!("{}", "   使用 #simple 标记强制使用简单对话".dimmed());
+                println!();
+            }
+            _ if input.starts_with("/workflow off") || input.starts_with("/workflow disable") => {
+                println!("{}", "⚠️  工作流自动模式已禁用".bright_yellow());
+                println!("{}", "💡 所有任务将使用简单对话模式".bright_cyan());
+                println!("{}", "   使用 #workflow 标记可手动启用工作流".dimmed());
+                println!();
+            }
+            _ if input.starts_with("/workflow ") => {
+                println!("{} Unknown /workflow subcommand", "❌".red());
+                println!("{} Usage: /workflow [status|on|off]", "💡".bright_blue());
+            }
+            _ if input.starts_with("/skills show ") => {
+                let skill_name = input.strip_prefix("/skills show ").unwrap_or("").trim();
+                self.show_skill(skill_name)?;
+            }
+            _ if input.starts_with("/skills ") => {
+                println!("{} Unknown /skills subcommand", "❌".red());
+                println!("{} Usage: /skills [list|show <name>]", "💡".bright_blue());
+            }
             _ if input.starts_with('/') => {
                 // 尝试作为 skill 执行
                 if self.try_execute_skill(input).await? {
@@ -110,134 +139,15 @@ impl OxideCli {
                 println!("{} Type /help for available commands", "💡".bright_blue());
             }
             _ => {
-                // 处理文件引用
-                let (parsed_input, file_refs) = parse_file_references(input);
+                // 评估任务复杂度
+                let use_workflow = self.complexity_evaluator.should_use_workflow(input);
 
-                // 显示文件引用信息
-                if !file_refs.is_empty() {
-                    println!();
-                    println!("{}", "📎 已引用文件:".bright_cyan());
-                    for ref_info in &file_refs {
-                        println!("  {}", ref_info.display_info());
-                    }
-                    println!();
-                }
-
-                // 构建完整的用户消息（包含文件内容）
-                let enhanced_input = if !file_refs.is_empty() {
-                    let mut enhanced = String::new();
-
-                    // 添加文件内容
-                    for ref_info in &file_refs {
-                        enhanced.push_str(&format!(
-                            "```file_path=\"{}\"\n{}\n```\n\n",
-                            ref_info.file_path.display(),
-                            ref_info.content
-                        ));
-                    }
-
-                    // 添加用户输入
-                    enhanced.push_str(&parsed_input);
-                    enhanced
+                if use_workflow {
+                    // 使用 PAOR 工作流处理复杂任务
+                    self.handle_with_workflow(input).await?;
                 } else {
-                    input.to_string()
-                };
-
-                // Add user message to context
-                self.context_manager.add_message(Message::user(&enhanced_input));
-
-                // 计算 token 预估
-                let messages = self.context_manager.get_messages();
-                let input_tokens = count_messages_tokens(
-                    &messages.iter().map(|m| {
-                        let serializable = SerializableMessage::from(m);
-                        (serializable.role, serializable.content)
-                    }).collect::<Vec<_>>()
-                );
-
-                // 预估输出 tokens（通常是输入的 1.5-2 倍，这里保守估计）
-                let estimated_output = (input_tokens as f64 * 0.5).ceil() as usize;
-
-                let usage = TokenUsage::new(input_tokens, estimated_output);
-
-                // 显示 token 预估
-                println!();
-                println!(
-                    "{} {} | {} {} | {} {}",
-                    "📊".bright_blue(),
-                    format!("输入: {} tokens", usage.input_tokens).bright_white(),
-                    "预估输出".bright_yellow(),
-                    format!("~{} tokens", usage.output_tokens).bright_yellow(),
-                    "成本".bright_green(),
-                    format!("${:.6}", usage.estimated_cost()).bright_green()
-                );
-                println!();
-
-                // Start spinner
-                self.spinner.start("Thinking...");
-                stdout().flush().unwrap();
-
-                // Create session hook
-                let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
-
-                let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
-                    AgentType::OpenAI(agent) => {
-                        let mut stream = agent
-                            .stream_prompt(&enhanced_input)
-                            .with_hook(hook.clone())
-                            .multi_turn(20)
-                            .with_history(self.context_manager.get_messages().to_vec())
-                            .await;
-                        // Stop spinner before response starts
-                        self.spinner.stop();
-                        stream_with_animation(&mut stream).await
-                    }
-                    AgentType::Anthropic(agent) => {
-                        let mut stream = agent
-                            .stream_prompt(&enhanced_input)
-                            .with_hook(hook.clone())
-                            .multi_turn(20)
-                            .with_history(self.context_manager.get_messages().to_vec())
-                            .await;
-                        self.spinner.stop();
-                        stream_with_animation(&mut stream).await
-                    }
-                };
-
-                println!();
-
-                match response_result {
-                    Ok(resp) => {
-                        // Get response content and add to context
-                        let response_content = resp.response();
-                        self.context_manager
-                            .add_message(Message::assistant(response_content));
-
-                        // Auto-save context
-                        if let Err(e) = self.context_manager.save() {
-                            println!("{} Failed to save context: {}", "⚠️".yellow(), e);
-                        }
-
-                        // We can't easily get token usage from the stream response in rig currently without more complex handling,
-                        // or if stream_to_stdout returns it.
-                        // rig 0.28 stream_to_stdout returns Result<StreamingResponse> which has a usage method?
-                        // Let's assume it works.
-                        self.add_session_tokens(resp.usage().total_tokens as u64);
-                        self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
-                    }
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::Interrupted
-                            && e.to_string().contains("prompt_cancelled")
-                        {
-                            println!("{} 操作已取消", "🚫".red());
-                        } else {
-                            println!("{} Failed to get AI response: {}", "❌".red(), e);
-                            println!(
-                                "{} Please check your API key and network connection",
-                                "💡".bright_blue()
-                            );
-                        }
-                    }
+                    // 使用简单对话模式
+                    self.handle_with_simple_chat(input).await?;
                 }
             }
         }
@@ -254,6 +164,331 @@ impl OxideCli {
             self.context_manager.session_id().bright_cyan()
         );
         println!();
+        Ok(())
+    }
+
+    /// 使用 PAOR 工作流处理复杂任务
+    async fn handle_with_workflow(&mut self, input: &str) -> Result<()> {
+        println!();
+        println!("{}", "🤖 检测到复杂任务，启用结构化思考模式".bright_cyan());
+        println!();
+        println!("{}", "💡 将使用 PAOR 框架系统地分析和解决问题".bright_yellow());
+        println!();
+
+        // 处理文件引用
+        let (parsed_input, file_refs) = parse_file_references(input);
+
+        // 显示文件引用信息
+        if !file_refs.is_empty() {
+            println!();
+            println!("{}", "📎 已引用文件:".bright_cyan());
+            for ref_info in &file_refs {
+                println!("  {}", ref_info.display_info());
+            }
+            println!();
+        }
+
+        // 构建完整的用户消息（包含文件内容和 PAOR 指导）
+        let enhanced_input = if !file_refs.is_empty() {
+            let mut enhanced = String::new();
+
+            // 添加文件内容
+            for ref_info in &file_refs {
+                enhanced.push_str(&format!(
+                    "```file_path=\"{}\"\n{}\n```\n\n",
+                    ref_info.file_path.display(),
+                    ref_info.content
+                ));
+            }
+
+            // 添加 PAOR 指导提示
+            enhanced.push_str(&format!(
+r#"
+---
+## 🎯 任务要求
+
+请使用 **PAOR（Plan-Act-Observe-Reflect）框架**系统地完成以下任务：
+
+**任务**: {}
+
+### 📋 PAOR 框架指导
+
+1. **Plan（规划）** - 分析任务，制定详细的执行计划
+   - 识别子任务和依赖关系
+   - 确定需要使用的工具和资源
+   - 预估潜在的问题和风险
+
+2. **Act（执行）** - 按计划执行操作
+   - 逐步执行每个子任务
+   - 使用适当的工具（read_file, write_file, edit_file 等）
+   - 记录执行过程和中间结果
+
+3. **Observe（观察）** - 检查执行结果
+   - 验证每个步骤是否成功
+   - 收集执行过程中的数据和反馈
+   - 识别任何偏差或错误
+
+4. **Reflect（反思）** - 总结和改进
+   - 评估任务完成度
+   - 总结经验教训
+   - 提出改进建议
+
+请按照这个框架系统地完成任务，确保每个步骤都有清晰的分析和说明。
+"#,
+                parsed_input
+            ));
+
+            enhanced
+        } else {
+            // 简单任务也需要 PAOR 指导
+            format!(
+r#"
+---
+## 🎯 任务要求
+
+请使用 **PAOR（Plan-Act-Observe-Reflect）框架**系统地完成以下任务：
+
+**任务**: {}
+
+### 📋 PAOR 框架指导
+
+1. **Plan（规划）** - 分析任务，制定执行计划
+2. **Act（执行）** - 按计划执行操作
+3. **Observe（观察）** - 检查执行结果
+4. **Reflect（反思）** - 总结和改进
+
+请系统地完成这个任务。
+"#,
+                input
+            )
+        };
+
+        // 添加用户消息到上下文
+        self.context_manager.add_message(Message::user(&enhanced_input));
+
+        // 计算 token 预估
+        let messages = self.context_manager.get_messages();
+        let input_tokens = count_messages_tokens(
+            &messages.iter().map(|m| {
+                let serializable = SerializableMessage::from(m);
+                (serializable.role, serializable.content)
+            }).collect::<Vec<_>>()
+        );
+
+        let estimated_output = (input_tokens as f64 * 0.5).ceil() as usize;
+        let usage = TokenUsage::new(input_tokens, estimated_output);
+
+        // 显示 token 预估
+        println!();
+        println!(
+            "{} {} | {} {} | {} {}",
+            "📊".bright_blue(),
+            format!("输入: {} tokens", usage.input_tokens).bright_white(),
+            "预估输出".bright_yellow(),
+            format!("~{} tokens", usage.output_tokens).bright_yellow(),
+            "成本".bright_green(),
+            format!("${:.6}", usage.estimated_cost()).bright_green()
+        );
+        println!();
+
+        // Start spinner
+        self.spinner.start("使用 PAOR 框架思考中...");
+        stdout().flush().unwrap();
+
+        // Create session hook
+        let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
+
+        let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
+            AgentType::OpenAI(agent) => {
+                let mut stream = agent
+                    .stream_prompt(&enhanced_input)
+                    .with_hook(hook.clone())
+                    .multi_turn(20)
+                    .with_history(self.context_manager.get_messages().to_vec())
+                    .await;
+                self.spinner.stop();
+                stream_with_animation(&mut stream).await
+            }
+            AgentType::Anthropic(agent) => {
+                let mut stream = agent
+                    .stream_prompt(&enhanced_input)
+                    .with_hook(hook.clone())
+                    .multi_turn(20)
+                    .with_history(self.context_manager.get_messages().to_vec())
+                    .await;
+                self.spinner.stop();
+                stream_with_animation(&mut stream).await
+            }
+        };
+
+        println!();
+
+        match response_result {
+            Ok(resp) => {
+                let response_content = resp.response();
+                self.context_manager
+                    .add_message(Message::assistant(response_content));
+
+                if let Err(e) = self.context_manager.save() {
+                    println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                }
+
+                self.add_session_tokens(resp.usage().total_tokens as u64);
+                self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
+
+                println!();
+                println!("{}", "✅ PAOR 框架分析完成".bright_green());
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::Interrupted
+                    && e.to_string().contains("prompt_cancelled")
+                {
+                    println!("{} 操作已取消", "🚫".red());
+                } else {
+                    println!("{} Failed to get AI response: {}", "❌".red(), e);
+                    println!(
+                        "{} Please check your API key and network connection",
+                        "💡".bright_blue()
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 使用简单对话模式处理任务
+    async fn handle_with_simple_chat(&mut self, input: &str) -> Result<()> {
+        // 处理文件引用
+        let (parsed_input, file_refs) = parse_file_references(input);
+
+        // 显示文件引用信息
+        if !file_refs.is_empty() {
+            println!();
+            println!("{}", "📎 已引用文件:".bright_cyan());
+            for ref_info in &file_refs {
+                println!("  {}", ref_info.display_info());
+            }
+            println!();
+        }
+
+        // 构建完整的用户消息（包含文件内容）
+        let enhanced_input = if !file_refs.is_empty() {
+            let mut enhanced = String::new();
+
+            // 添加文件内容
+            for ref_info in &file_refs {
+                enhanced.push_str(&format!(
+                    "```file_path=\"{}\"\n{}\n```\n\n",
+                    ref_info.file_path.display(),
+                    ref_info.content
+                ));
+            }
+
+            // 添加用户输入
+            enhanced.push_str(&parsed_input);
+            enhanced
+        } else {
+            input.to_string()
+        };
+
+        // Add user message to context
+        self.context_manager.add_message(Message::user(&enhanced_input));
+
+        // 计算 token 预估
+        let messages = self.context_manager.get_messages();
+        let input_tokens = count_messages_tokens(
+            &messages.iter().map(|m| {
+                let serializable = SerializableMessage::from(m);
+                (serializable.role, serializable.content)
+            }).collect::<Vec<_>>()
+        );
+
+        // 预估输出 tokens（通常是输入的 1.5-2 倍，这里保守估计）
+        let estimated_output = (input_tokens as f64 * 0.5).ceil() as usize;
+
+        let usage = TokenUsage::new(input_tokens, estimated_output);
+
+        // 显示 token 预估
+        println!();
+        println!(
+            "{} {} | {} {} | {} {}",
+            "📊".bright_blue(),
+            format!("输入: {} tokens", usage.input_tokens).bright_white(),
+            "预估输出".bright_yellow(),
+            format!("~{} tokens", usage.output_tokens).bright_yellow(),
+            "成本".bright_green(),
+            format!("${:.6}", usage.estimated_cost()).bright_green()
+        );
+        println!();
+
+        // Start spinner
+        self.spinner.start("Thinking...");
+        stdout().flush().unwrap();
+
+        // Create session hook
+        let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
+
+        let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
+            AgentType::OpenAI(agent) => {
+                let mut stream = agent
+                    .stream_prompt(&enhanced_input)
+                    .with_hook(hook.clone())
+                    .multi_turn(20)
+                    .with_history(self.context_manager.get_messages().to_vec())
+                    .await;
+                // Stop spinner before response starts
+                self.spinner.stop();
+                stream_with_animation(&mut stream).await
+            }
+            AgentType::Anthropic(agent) => {
+                let mut stream = agent
+                    .stream_prompt(&enhanced_input)
+                    .with_hook(hook.clone())
+                    .multi_turn(20)
+                    .with_history(self.context_manager.get_messages().to_vec())
+                    .await;
+                self.spinner.stop();
+                stream_with_animation(&mut stream).await
+            }
+        };
+
+        println!();
+
+        match response_result {
+            Ok(resp) => {
+                // Get response content and add to context
+                let response_content = resp.response();
+                self.context_manager
+                    .add_message(Message::assistant(response_content));
+
+                // Auto-save context
+                if let Err(e) = self.context_manager.save() {
+                    println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                }
+
+                // We can't easily get token usage from the stream response in rig currently without more complex handling,
+                // or if stream_to_stdout returns it.
+                // rig 0.28 stream_to_stdout returns Result<StreamingResponse> which has a usage method?
+                // Let's assume it works.
+                self.add_session_tokens(resp.usage().total_tokens as u64);
+                self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::Interrupted
+                    && e.to_string().contains("prompt_cancelled")
+                {
+                    println!("{} 操作已取消", "🚫".red());
+                } else {
+                    println!("{} Failed to get AI response: {}", "❌".red(), e);
+                    println!(
+                        "{} Please check your API key and network connection",
+                        "💡".bright_blue()
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1307,6 +1542,22 @@ impl OxideCli {
             "█".repeat(filled).bright_blue(),
             "░".repeat(empty).dimmed()
         )
+    }
+
+    fn show_workflow_status(&self) -> Result<()> {
+        println!("{}", "🤖 PAOR 工作流状态".bright_cyan());
+        println!();
+        println!("  {} {}", "模式:".bright_white(), "自动检测".bright_green());
+        println!("  {} {}", "评估器:".bright_white(), "已启用".bright_green());
+        println!("  {} {}", "策略:".bright_white(), "复杂任务自动使用工作流".bright_white());
+        println!();
+        println!("{}", "📋 使用建议:".bright_yellow());
+        println!("  • 复杂任务（>50字）自动启用工作流");
+        println!("  • 使用 #workflow 标记强制启用工作流");
+        println!("  • 使用 #simple 标记强制使用简单对话");
+        println!();
+
+        Ok(())
     }
 
     /// 显示带动画的 token 统计（数字滚动 + 进度条）

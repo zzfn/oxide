@@ -7,6 +7,8 @@ pub mod state;
 pub mod types;
 pub mod observation;
 pub mod tool_wrapper;
+pub mod executor;
+pub mod complexity;
 
 pub use orchestrator::WorkflowOrchestrator;
 pub use state::{WorkflowState, WorkflowPhase};
@@ -15,3 +17,5 @@ pub use tool_wrapper::ObservableTool;
 pub use types::{Task, TaskStatus, TaskId, Plan, Observation, Reflection};
 #[allow(unused_imports)]
 pub use observation::ObservationCollector;
+pub use executor::WorkflowExecutor;
+pub use complexity::{ComplexityEvaluator, ComplexityLevel};

@@ -12,6 +12,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::config::secret::Secret;
+
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 #[allow(dead_code)]
 const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
@@ -239,6 +241,7 @@ impl ConfigLoader {
             .or_else(|_| env::var("ANTHROPIC_API_KEY"))
             .or_else(|_| env::var("API_KEY"))
             .context("未找到 OXIDE_AUTH_TOKEN、ANTHROPIC_API_KEY 或 API_KEY 环境变量")?;
+        let auth_token = Secret::new(auth_token);
 
         let base_url = env::var("OXIDE_BASE_URL")
             .or_else(|_| env::var("API_URL"))
@@ -287,10 +290,10 @@ impl Default for ConfigLoader {
 }
 
 /// 加载后的完整配置
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LoadedConfig {
     pub base_url: String,
-    pub auth_token: String,
+    pub auth_token: Secret<String>,
     pub model: Option<String>,
     pub max_tokens: u32,
     #[allow(dead_code)]
@@ -304,6 +307,24 @@ pub struct LoadedConfig {
     pub theme_config: Option<ThemeConfig>,
     #[allow(dead_code)]
     pub features_config: FeaturesConfig,
+}
+
+// 手动实现 Debug，防止 auth_token 泄露
+impl std::fmt::Debug for LoadedConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoadedConfig")
+            .field("base_url", &self.base_url)
+            .field("auth_token", &self.auth_token) // Secret 的 Debug 实现会输出 "***"
+            .field("model", &self.model)
+            .field("max_tokens", &self.max_tokens)
+            .field("temperature", &self.temperature)
+            .field("stream_chars_per_tick", &self.stream_chars_per_tick)
+            .field("project_instructions", &self.project_instructions)
+            .field("agent_configs", &self.agent_configs)
+            .field("theme_config", &self.theme_config)
+            .field("features_config", &self.features_config)
+            .finish()
+    }
 }
 
 #[cfg(test)]

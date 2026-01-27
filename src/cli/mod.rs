@@ -78,6 +78,10 @@ fn build_commands() -> HashMap<String, CommandInfo> {
         "/skills".to_string(),
         CommandInfo::new("/skills [list|show <name>]", "管理技能"),
     );
+    commands.insert(
+        "/workflow".to_string(),
+        CommandInfo::new("/workflow [status|on|off]", "PAOR 工作流设置"),
+    );
     commands
 }
 
@@ -557,10 +561,13 @@ pub const LOGO: &str = r#"
 
 use crate::agent::HitlIntegration;
 use crate::agent::AgentType;
+use crate::agent::SubagentManager;
+use crate::agent::workflow::ComplexityEvaluator;
 use crate::cli::render::Spinner;
+use crate::config::secret::Secret;
 
 pub struct OxideCli {
-    pub api_key: String,
+    pub api_key: Secret<String>,
     pub model_name: String,
     pub agent: AgentType,
     pub context_manager: ContextManager,
@@ -568,11 +575,27 @@ pub struct OxideCli {
     prompt_label: PromptLabel,
     spinner: Spinner,
     total_tokens: Arc<AtomicU64>,
+    /// 子 agent 管理器（用于工作流）
+    subagent_manager: Arc<SubagentManager>,
+    /// 复杂度评估器
+    complexity_evaluator: ComplexityEvaluator,
+}
+
+// 手动实现 Debug，防止 api_key 泄露
+impl std::fmt::Debug for OxideCli {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OxideCli")
+            .field("api_key", &self.api_key) // Secret 的 Debug 实现会输出 "***"
+            .field("model_name", &self.model_name)
+            .field("agent", &self.agent)
+            .field("context_manager", &self.context_manager)
+            .finish()
+    }
 }
 
 impl OxideCli {
     pub fn new(
-        api_key: String,
+        api_key: Secret<String>,
         model_name: String,
         agent: AgentType,
         context_manager: ContextManager,
@@ -587,6 +610,8 @@ impl OxideCli {
             prompt_label: PromptLabel::Oxide,
             spinner: Spinner::new(),
             total_tokens: Arc::new(AtomicU64::new(0)),
+            subagent_manager: Arc::new(SubagentManager::new()),
+            complexity_evaluator: ComplexityEvaluator::new(),
         }
     }
 
