@@ -158,17 +158,22 @@ cargo run
 | `/clear` | 清空当前对话 |
 | `/config [show|edit|reload|validate]` | 管理配置 |
 | `/history` | 显示当前会话的历史消息 |
+
+## 已知问题
+
+- PAOR 工作流未接入主对话：`src/agent/workflow/orchestrator.rs` 仅有占位逻辑，目前只在 `examples/workflow_example.rs` 演示使用。
+- Task/TaskOutput 工具未集成到主 Agent：`src/tools/task.rs` 标注同步执行需要完整集成，`src/tools/mod.rs` 也注明暂未集成。
+- Agent 类型命名体系不一致：`AgentType` 是实例枚举（Anthropic/OpenAI），`NewAgentType` 才是 Main/Explore/Plan 等类型，CLI 中混用导致“当前 agent 类型”与实例未绑定。
 | `/sessions` | 列出所有保存的会话 |
 | `/load <id>` | 加载指定的会话 |
 | `/delete <id>` | 删除指定会话 |
-| `/agent [list|switch <type>|capabilities]` | 管理或切换 Agent 类型 ⚠️ |
+| `/agent [list|capabilities]` | 查看 Agent 类型与能力 |
 | `/tasks [list|show <id>|cancel <id>]` | 管理后台任务 |
 | `/skills [list|show <name>]` | 管理和使用技能 |
 | `/<skill-name>` | 执行指定的技能 |
 | `/exit` 或 `/quit` | 退出程序 |
 
 **⚠️ 注意：** 部分功能标记为实验性或未完全实现：
-- Agent 切换功能 (`/agent switch`) 当前仅记录类型，Agent 未完全重建
 
 ### 对话示例
 

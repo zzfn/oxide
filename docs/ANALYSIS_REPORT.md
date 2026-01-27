@@ -240,7 +240,7 @@ pub use shell_execute::WrappedShellExecuteTool;
 
 **README.md:**
 ```
-/agent [list|switch <type>] - 管理或切换 Agent 类型
+/agent [list|capabilities] - 查看 Agent 类型与能力
 ```
 
 **实际实现**
@@ -263,35 +263,16 @@ pub enum AgentType {
 }
 ```
 
-**src/cli/command.rs (Lines 804-840):**
+**src/cli/command.rs:**
 ```rust
-fn switch_agent(&mut self, agent_type_str: &str) -> Result<()> {
-    // TODO: 实际切换 Agent 逻辑
-    // 目前需要使用 AgentBuilder 重新构建 Agent
-    // 这需要存储 base_url 和 auth_token
-
-    println!(
-        "{} Switched to {} Agent",
-        "✅".bright_green(),
-        agent_type.display_name().bright_cyan()
-    );
-    println!(
-        "{} Note: Agent switching is not fully implemented yet.",
-        "⚠️".yellow()
-    );
-    println!(
-        "{} The current agent type has been noted but agent has not been rebuilt.",
-        "💡".bright_blue()
-    );
-    Ok(())
-}
+"/agent" | "/agent list" => { /* ... */ }
+_ if input.starts_with("/agent capabilities") => { /* ... */ }
 ```
 
 #### 不一致点
 
 | 功能 | 文档描述 | 实际实现 |
 |------|---------|---------|
-| Agent 切换 | 可切换 Agent 类型 | 标记为未完全实现 |
 | Agent 类型 | 未详细说明 | 6 种类型（Main, Explore, Plan, CodeReviewer, FrontendDeveloper, General） |
 
 #### 问题严重性
@@ -475,7 +456,6 @@ src/
 ### 待改进
 
 1. **标记为未实现的功能**
-   - Agent 切换未完全实现
    - 部分工具未集成到主 Agent
    - 配置重载未完全实现
 
@@ -568,7 +548,7 @@ src/
 
 ### 中优先级
 
-5. [ ] 标记未完全实现的功能（Agent 切换、部分工具）
+5. [ ] 标记未完全实现的功能（部分工具）
 6. [ ] 添加配置优先级说明
 7. [ ] 添加 Agent 类型详细说明
 8. [ ] 更新 openspec/project.md 的架构描述

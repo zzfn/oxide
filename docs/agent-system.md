@@ -31,13 +31,13 @@ Oxide 的 Agent 系统是一个灵活、类型安全的 AI 助手架构，支持
 ┌─────────────────────────────────────┐
 │         CLI 层                      │
 │  - 用户命令处理                      │
-│  - Agent 切换                        │
+│  - Agent 列表与能力展示               │
 └─────────────────────────────────────┘
                 ↓
 ┌─────────────────────────────────────┐
 │      Agent 管理层                   │
 │  - SubagentManager                  │
-│  - Agent 注册和切换                 │
+│  - Agent 注册与能力查询             │
 └─────────────────────────────────────┘
                 ↓
 ┌─────────────────────────────────────┐
@@ -381,19 +381,13 @@ let agent = builder.build_main()?;
 let response = agent.prompt("Help me understand this codebase").await?;
 ```
 
-### Agent 切换
+### Agent 查看
 
-CLI 支持运行时切换 Agent：
+CLI 仅支持查看 Agent 列表与能力。
 
 ```bash
 # 查看所有可用的 Agent
 /agent list
-
-# 切换到 Explore Agent
-/agent switch explore
-
-# 切换到 Plan Agent
-/agent switch plan
 
 # 查看 Agent 能力
 /agent capabilities
@@ -471,7 +465,7 @@ impl AgentBuilder {
 fn handle_agent_command(&mut self, args: &str) -> Result<()> {
     match args {
         "list" => self.list_agents(),
-        "switch database_admin" => self.switch_agent(AgentType::DatabaseAdmin),
+        "capabilities" => self.show_agent_capabilities(),
         // ... 其他命令
     }
 }
