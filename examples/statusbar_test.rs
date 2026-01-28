@@ -30,13 +30,17 @@ fn main() -> anyhow::Result<()> {
     // 状态栏数据
     let counter = Arc::new(Mutex::new(0));
     let counter_clone = counter.clone();
+    let refresh_count = Arc::new(Mutex::new(0u32));
+    let refresh_count_clone = refresh_count.clone();
 
     // 后台线程：持续刷新状态栏
     let refresh_handle = thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_millis(100));
             let count = *counter_clone.lock().unwrap();
-            let _ = render_statusbar(width, height, count);
+            let mut refresh = refresh_count_clone.lock().unwrap();
+            *refresh = refresh.wrapping_add(1);
+            let _ = render_statusbar(width, height, count, *refresh);
         }
     });
 
@@ -66,11 +70,11 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn render_statusbar(width: u16, height: u16, counter: usize) -> anyhow::Result<()> {
+fn render_statusbar(width: u16, height: u16, counter: usize, refresh: u32) -> anyhow::Result<()> {
     print!("\x1b[s");
     print!("\x1b[{};1H", height);
 
-    let info = format!(" 计数: {} | 终端: {}x{} ", counter, width, height);
+    let info = format!(" 输入: {} | 刷新: {} | 终端: {}x{} ", counter, refresh, width, height);
     let padding = " ".repeat((width as usize).saturating_sub(info.len()));
     print!("\x1b[48;5;238m{}{}\x1b[0m", info, padding);
 
