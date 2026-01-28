@@ -1,118 +1,139 @@
 //! 工作流引擎使用示例
 //!
-//! 演示如何使用 WorkflowOrchestrator 执行自主工作流
+//! 演示如何使用 WorkflowOrchestrator 和 WorkflowExecutor
+//!
+//! 注意：完整的工作流执行需要配置有效的 LLM API 密钥。
+//! 此示例仅演示工作流的创建和基本状态管理。
 
-use oxide::agent::{SubagentManager, WorkflowOrchestrator};
+use oxide::agent::workflow::{WorkflowOrchestrator, WorkflowPhase, OrchestratorConfig};
+use oxide::agent::SubagentManager;
 use std::sync::Arc;
 
-fn main() -> anyhow::Result<()> {
-    println!("🚀 Workflow Engine Example\n");
-    
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    println!("🚀 PAOR 工作流引擎示例\n");
+
     // 1. 创建子 agent 管理器
     let subagent_manager = Arc::new(SubagentManager::new());
-    
-    // 2. 创建工作流编排器
+
+    // 2. 创建自定义配置
+    let config = OrchestratorConfig {
+        max_iterations: 10,
+        verbose: true,
+        auto_retry: true,
+        max_retries: 3,
+    };
+
+    // 3. 创建工作流编排器
     let orchestrator = WorkflowOrchestrator::new(
-        "Find all TODO comments in the codebase and create a task list".to_string(),
+        "分析代码库中的所有 TODO 注释并创建任务列表".to_string(),
         subagent_manager,
-        None, // 使用默认配置
+        Some(config),
     );
-    
-    println!("📋 User Request:");
-    println!("   {}\n", orchestrator.get_state()?.user_request);
-    
-    // 3. 启动工作流
-    orchestrator.start()?;
-    println!("✅ Workflow started\n");
-    
-    // 4. 执行 PAOR 循环
-    let mut iteration = 0;
-    let max_display = 5; // 只显示前几次迭代
-    
-    loop {
-        iteration += 1;
-        
-        // 获取当前状态
-        let state = orchestrator.get_state()?;
-        
-        if iteration <= max_display {
-            println!("🔄 Iteration {}: Phase = {}", iteration, state.phase);
-        }
-        
-        // 执行一次迭代
-        let should_continue = orchestrator.execute_iteration()?;
-        
-        // 检查是否应该继续
-        if !should_continue {
-            break;
-        }
-        
-        // 防止无限循环（示例中限制最多显示几次）
-        if iteration >= 100 {
-            println!("⚠️  Reached maximum demo iterations");
-            break;
-        }
+
+    // 4. 获取初始状态
+    let state = orchestrator.get_state().await?;
+    println!("📋 用户请求:");
+    println!("   {}\n", state.user_request);
+    println!("📊 初始状态:");
+    println!("   阶段: {}", state.phase);
+    println!("   迭代: {}", state.iteration);
+    println!("   最大迭代: {}", state.max_iterations);
+    println!();
+
+    // 5. 启动工作流（进入 Planning 阶段）
+    orchestrator.start().await?;
+    println!("✅ 工作流已启动\n");
+
+    let state = orchestrator.get_state().await?;
+    println!("📊 启动后状态:");
+    println!("   阶段: {}", state.phase);
+    println!("   迭代: {}", state.iteration);
+    println!();
+
+    // 6. 演示观察数据收集
+    println!("👁️  演示观察数据收集:");
+    let collector = orchestrator.get_observation_collector();
+
+    use std::collections::HashMap;
+    collector.add_tool_execution(
+        "read_file".to_string(),
+        HashMap::from([("path".to_string(), serde_json::json!("src/main.rs"))]),
+        Some(serde_json::json!({"content": "// TODO: implement feature"})),
+        true,
+        None,
+        Some(50),
+    );
+
+    collector.add_tool_execution(
+        "grep_search".to_string(),
+        HashMap::from([("pattern".to_string(), serde_json::json!("TODO"))]),
+        Some(serde_json::json!({"matches": 5})),
+        true,
+        None,
+        Some(120),
+    );
+
+    let summary = collector.summarize();
+    println!("   总观察数: {}", summary.total_observations);
+    println!("   成功: {}", summary.successful);
+    println!("   失败: {}", summary.failed);
+    println!("   工具执行: {}", summary.tool_executions);
+    println!();
+
+    // 7. 演示工作流阶段
+    println!("📋 PAOR 工作流阶段说明:");
+    let phases = [
+        (WorkflowPhase::Idle, "空闲 - 等待启动"),
+        (WorkflowPhase::Planning, "规划 - 分析任务并制定计划"),
+        (WorkflowPhase::Acting, "执行 - 执行计划中的任务"),
+        (WorkflowPhase::Observing, "观察 - 收集执行结果"),
+        (WorkflowPhase::Reflecting, "反思 - 评估进展并决定下一步"),
+        (WorkflowPhase::Complete, "完成 - 目标已达成"),
+        (WorkflowPhase::Failed, "失败 - 遇到不可恢复错误"),
+    ];
+
+    for (phase, desc) in phases {
+        let terminal = if phase.is_terminal() { " [终止状态]" } else { "" };
+        println!("   {} - {}{}", phase, desc, terminal);
     }
-    
     println!();
-    
-    // 5. 获取最终状态
-    let final_state = orchestrator.get_state()?;
-    println!("📊 Final State:");
-    println!("   Phase: {}", final_state.phase);
-    println!("   Iterations: {}", final_state.iteration);
-    println!("   Duration: {}ms", final_state.elapsed_ms());
-    
-    if let Some(reason) = &final_state.failure_reason {
-        println!("   Failure Reason: {}", reason);
-    }
-    
-    println!();
-    
-    // 6. 获取观察数据摘要
-    let obs_summary = orchestrator.get_observation_collector().summarize();
-    println!("👁️  Observations:");
-    println!("   Total: {}", obs_summary.total_observations);
-    println!("   Successful: {}", obs_summary.successful);
-    println!("   Failed: {}", obs_summary.failed);
-    println!("   Tool Executions: {}", obs_summary.tool_executions);
-    println!("   Subagent Calls: {}", obs_summary.subagent_calls);
-    
-    println!();
-    
-    // 7. 生成完整摘要
-    println!("📝 Full Summary:\n");
-    let summary = orchestrator.generate_summary()?;
+
+    // 8. 生成摘要
+    println!("📝 工作流摘要:\n");
+    let summary = orchestrator.generate_summary().await?;
     println!("{}", summary);
-    
+
+    println!("\n💡 提示: 要执行完整的工作流，需要配置有效的 LLM API 密钥。");
+    println!("   使用 WorkflowExecutor.execute(&agent) 方法执行完整的 PAOR 循环。");
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    #[test]
-    fn test_workflow_example() -> anyhow::Result<()> {
+
+    #[tokio::test]
+    async fn test_workflow_example() -> anyhow::Result<()> {
         let subagent_manager = Arc::new(SubagentManager::new());
         let orchestrator = WorkflowOrchestrator::new(
             "Test request".to_string(),
             subagent_manager,
             None,
         );
-        
-        orchestrator.start()?;
-        
-        // 执行几次迭代
-        for _ in 0..3 {
-            if !orchestrator.execute_iteration()? {
-                break;
-            }
-        }
-        
-        let state = orchestrator.get_state()?;
-        assert!(state.iteration > 0);
-        
+
+        // 验证初始状态
+        let state = orchestrator.get_state().await?;
+        assert_eq!(state.phase, WorkflowPhase::Idle);
+
+        // 启动工作流
+        orchestrator.start().await?;
+
+        let state = orchestrator.get_state().await?;
+        assert_eq!(state.phase, WorkflowPhase::Planning);
+        assert_eq!(state.iteration, 1);
+
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 use crate::agent::{AgentType, NewAgentType, SubagentManager};
-use crate::agent::workflow::WorkflowExecutor;
+use crate::agent::workflow::{WorkflowExecutor, WorkflowResult};
 use crate::context::SerializableMessage;
 use crate::hooks::SessionIdHook;
 use crate::skill::{SkillExecutor, SkillManager};
@@ -10,6 +10,7 @@ use colored::*;
 use rig::completion::Message;
 use rig::streaming::StreamingPrompt;
 use std::io::{stdout, Write};
+use std::sync::Arc;
 
 use super::render::stream_with_animation;
 use super::OxideCli;
@@ -170,9 +171,7 @@ impl OxideCli {
     /// 使用 PAOR 工作流处理复杂任务
     async fn handle_with_workflow(&mut self, input: &str) -> Result<()> {
         println!();
-        println!("{}", "🤖 检测到复杂任务，启用结构化思考模式".bright_cyan());
-        println!();
-        println!("{}", "💡 将使用 PAOR 框架系统地分析和解决问题".bright_yellow());
+        println!("{}", "🤖 检测到复杂任务，启用 PAOR 工作流引擎".bright_cyan());
         println!();
 
         // 处理文件引用
@@ -180,7 +179,6 @@ impl OxideCli {
 
         // 显示文件引用信息
         if !file_refs.is_empty() {
-            println!();
             println!("{}", "📎 已引用文件:".bright_cyan());
             for ref_info in &file_refs {
                 println!("  {}", ref_info.display_info());
@@ -188,83 +186,24 @@ impl OxideCli {
             println!();
         }
 
-        // 构建完整的用户消息（包含文件内容和 PAOR 指导）
-        let enhanced_input = if !file_refs.is_empty() {
-            let mut enhanced = String::new();
-
-            // 添加文件内容
+        // 构建完整的用户请求（包含文件内容）
+        let full_request = if !file_refs.is_empty() {
+            let mut request = String::new();
             for ref_info in &file_refs {
-                enhanced.push_str(&format!(
+                request.push_str(&format!(
                     "```file_path=\"{}\"\n{}\n```\n\n",
                     ref_info.file_path.display(),
                     ref_info.content
                 ));
             }
-
-            // 添加 PAOR 指导提示
-            enhanced.push_str(&format!(
-r#"
----
-## 🎯 任务要求
-
-请使用 **PAOR（Plan-Act-Observe-Reflect）框架**系统地完成以下任务：
-
-**任务**: {}
-
-### 📋 PAOR 框架指导
-
-1. **Plan（规划）** - 分析任务，制定详细的执行计划
-   - 识别子任务和依赖关系
-   - 确定需要使用的工具和资源
-   - 预估潜在的问题和风险
-
-2. **Act（执行）** - 按计划执行操作
-   - 逐步执行每个子任务
-   - 使用适当的工具（read_file, write_file, edit_file 等）
-   - 记录执行过程和中间结果
-
-3. **Observe（观察）** - 检查执行结果
-   - 验证每个步骤是否成功
-   - 收集执行过程中的数据和反馈
-   - 识别任何偏差或错误
-
-4. **Reflect（反思）** - 总结和改进
-   - 评估任务完成度
-   - 总结经验教训
-   - 提出改进建议
-
-请按照这个框架系统地完成任务，确保每个步骤都有清晰的分析和说明。
-"#,
-                parsed_input
-            ));
-
-            enhanced
+            request.push_str(&parsed_input);
+            request
         } else {
-            // 简单任务也需要 PAOR 指导
-            format!(
-r#"
----
-## 🎯 任务要求
-
-请使用 **PAOR（Plan-Act-Observe-Reflect）框架**系统地完成以下任务：
-
-**任务**: {}
-
-### 📋 PAOR 框架指导
-
-1. **Plan（规划）** - 分析任务，制定执行计划
-2. **Act（执行）** - 按计划执行操作
-3. **Observe（观察）** - 检查执行结果
-4. **Reflect（反思）** - 总结和改进
-
-请系统地完成这个任务。
-"#,
-                input
-            )
+            input.to_string()
         };
 
         // 添加用户消息到上下文
-        self.context_manager.add_message(Message::user(&enhanced_input));
+        self.context_manager.add_message(Message::user(&full_request));
 
         // 计算 token 预估
         let messages = self.context_manager.get_messages();
@@ -275,11 +214,10 @@ r#"
             }).collect::<Vec<_>>()
         );
 
-        let estimated_output = (input_tokens as f64 * 0.5).ceil() as usize;
+        let estimated_output = (input_tokens as f64 * 1.5).ceil() as usize;
         let usage = TokenUsage::new(input_tokens, estimated_output);
 
         // 显示 token 预估
-        println!();
         println!(
             "{} {} | {} {} | {} {}",
             "📊".bright_blue(),
@@ -291,17 +229,99 @@ r#"
         );
         println!();
 
-        // Start spinner
-        self.spinner.start("使用 PAOR 框架思考中...");
+        // 显示工作流阶段说明
+        println!("{}", "📋 PAOR 工作流阶段:".bright_yellow());
+        println!("  {} Planning  - 分析任务，制定执行计划", "1.".dimmed());
+        println!("  {} Acting    - 执行计划中的任务", "2.".dimmed());
+        println!("  {} Observing - 收集和分析执行结果", "3.".dimmed());
+        println!("  {} Reflecting - 评估进展，决定下一步", "4.".dimmed());
+        println!();
+
+        // 创建工作流执行器
+        let executor = WorkflowExecutor::new(
+            full_request.clone(),
+            Arc::clone(&self.subagent_manager),
+        ).with_verbose(true);
+
+        // 执行工作流
+        self.spinner.start("PAOR 工作流执行中...");
         stdout().flush().unwrap();
 
-        // Create session hook
+        let result: Result<WorkflowResult, anyhow::Error> = executor.execute(&self.agent).await;
+
+        self.spinner.stop();
+        println!();
+
+        match result {
+            Ok(workflow_result) => {
+                // 显示工作流结果
+                if workflow_result.success {
+                    println!("{}", "✅ 工作流执行成功".bright_green());
+                } else {
+                    println!("{}", "⚠️  工作流执行未完成".bright_yellow());
+                    if let Some(ref reason) = workflow_result.failure_reason {
+                        println!("  原因: {}", reason.bright_red());
+                    }
+                }
+
+                println!();
+                println!("{}", "📊 执行统计:".bright_cyan());
+                println!("  迭代次数: {}", workflow_result.iterations.to_string().bright_white());
+                println!("  最终状态: {}", format!("{}", workflow_result.phase).bright_white());
+                println!();
+
+                // 获取响应内容
+                let response_content = workflow_result.display_response();
+
+                // 添加助手响应到上下文
+                self.context_manager
+                    .add_message(Message::assistant(&response_content));
+
+                // 保存上下文
+                if let Err(e) = self.context_manager.save() {
+                    println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                }
+
+                // 显示响应摘要
+                println!("{}", "📝 工作流摘要:".bright_cyan());
+                println!();
+
+                // 限制显示长度
+                let display_content = if response_content.len() > 2000 {
+                    format!("{}...\n\n(响应已截断，完整内容已保存到上下文)", &response_content[..2000])
+                } else {
+                    response_content
+                };
+                println!("{}", display_content);
+            }
+            Err(e) => {
+                println!("{} 工作流执行失败: {}", "❌".red(), e);
+                println!(
+                    "{} 请检查 API 配置和网络连接",
+                    "💡".bright_blue()
+                );
+
+                // 回退到简单对话模式
+                println!();
+                println!("{}", "🔄 回退到简单对话模式...".bright_yellow());
+                return self.handle_with_simple_chat_internal(&full_request).await;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 内部简单对话处理（用于回退）
+    async fn handle_with_simple_chat_internal(&mut self, input: &str) -> Result<()> {
+        self.spinner.start("Thinking...");
+        stdout().flush().unwrap();
+
         let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
 
         let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
             AgentType::OpenAI(agent) => {
                 let mut stream = agent
-                    .stream_prompt(&enhanced_input)
+                    .stream_prompt(input)
                     .with_hook(hook.clone())
                     .multi_turn(20)
                     .with_history(self.context_manager.get_messages().to_vec())
@@ -311,7 +331,7 @@ r#"
             }
             AgentType::Anthropic(agent) => {
                 let mut stream = agent
-                    .stream_prompt(&enhanced_input)
+                    .stream_prompt(input)
                     .with_hook(hook.clone())
                     .multi_turn(20)
                     .with_history(self.context_manager.get_messages().to_vec())
@@ -335,9 +355,6 @@ r#"
 
                 self.add_session_tokens(resp.usage().total_tokens as u64);
                 self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
-
-                println!();
-                println!("{}", "✅ PAOR 框架分析完成".bright_green());
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::Interrupted
@@ -346,10 +363,6 @@ r#"
                     println!("{} 操作已取消", "🚫".red());
                 } else {
                     println!("{} Failed to get AI response: {}", "❌".red(), e);
-                    println!(
-                        "{} Please check your API key and network connection",
-                        "💡".bright_blue()
-                    );
                 }
             }
         }
