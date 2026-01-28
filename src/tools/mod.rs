@@ -36,6 +36,7 @@ pub mod shell_execute;
 pub mod task;
 pub mod task_output;
 
+pub use ask_user_question::WrappedAskUserQuestionTool;
 pub use create_directory::WrappedCreateDirectoryTool;
 pub use delete_file::WrappedDeleteFileTool;
 pub use edit_file::WrappedEditFileTool;

@@ -6,8 +6,8 @@ use crate::agent::{HitlIntegration, MaybeHitlTool};
 use crate::agent::types::AgentType;
 use crate::config::secret::Secret;
 use crate::tools::{
-    WrappedCreateDirectoryTool, WrappedDeleteFileTool, WrappedEditFileTool,
-    WrappedGlobTool, WrappedGrepSearchTool, WrappedReadFileTool,
+    WrappedAskUserQuestionTool, WrappedCreateDirectoryTool, WrappedDeleteFileTool,
+    WrappedEditFileTool, WrappedGlobTool, WrappedGrepSearchTool, WrappedReadFileTool,
     WrappedScanCodebaseTool, WrappedWriteFileTool, WrappedShellExecuteTool,
     WrappedSearchReplaceTool, WrappedEnterPlanModeTool, WrappedExitPlanModeTool,
 };
@@ -101,7 +101,15 @@ In plan mode:
 3. Use exit_plan_mode to present your plan and request user approval
 4. Only proceed with implementation after user approves
 
-Skip plan mode for simple tasks like typo fixes, single-line changes, or tasks with very specific instructions."#)
+Skip plan mode for simple tasks like typo fixes, single-line changes, or tasks with very specific instructions.
+
+【User Interaction】
+Use ask_user_question when you need to:
+- Gather user preferences or requirements during execution
+- Clarify ambiguous instructions
+- Get decisions on implementation choices
+- Offer choices about what direction to take
+Users can always select "Other" to provide custom input. Use multiSelect: true to allow multiple answers."#)
                 .max_tokens(4096)
                 .tool(MaybeHitlTool::new(tools.read_file, self.hitl.clone()))
                 .tool(MaybeHitlTool::new(tools.write_file, self.hitl.clone()))
@@ -114,6 +122,7 @@ Skip plan mode for simple tasks like typo fixes, single-line changes, or tasks w
                 .tool(MaybeHitlTool::new(tools.glob, self.hitl.clone()))
                 .tool(tools.enter_plan_mode)
                 .tool(tools.exit_plan_mode)
+                .tool(tools.ask_user_question)
                 .build();
 
             Ok(AgentEnum::Anthropic(agent))
@@ -147,7 +156,15 @@ In plan mode:
 3. Use exit_plan_mode to present your plan and request user approval
 4. Only proceed with implementation after user approves
 
-Skip plan mode for simple tasks like typo fixes, single-line changes, or tasks with very specific instructions."#)
+Skip plan mode for simple tasks like typo fixes, single-line changes, or tasks with very specific instructions.
+
+【User Interaction】
+Use ask_user_question when you need to:
+- Gather user preferences or requirements during execution
+- Clarify ambiguous instructions
+- Get decisions on implementation choices
+- Offer choices about what direction to take
+Users can always select "Other" to provide custom input. Use multiSelect: true to allow multiple answers."#)
                 .max_tokens(4096)
                 .tool(MaybeHitlTool::new(tools.read_file, self.hitl.clone()))
                 .tool(MaybeHitlTool::new(tools.write_file, self.hitl.clone()))
@@ -161,6 +178,7 @@ Skip plan mode for simple tasks like typo fixes, single-line changes, or tasks w
                 .tool(MaybeHitlTool::new(tools.search_replace, self.hitl.clone()))
                 .tool(tools.enter_plan_mode)
                 .tool(tools.exit_plan_mode)
+                .tool(tools.ask_user_question)
                 .build();
 
             Ok(AgentEnum::OpenAI(agent))
@@ -384,6 +402,7 @@ Skip plan mode for simple tasks like typo fixes, single-line changes, or tasks w
             search_replace: WrappedSearchReplaceTool::new(),
             enter_plan_mode: WrappedEnterPlanModeTool::new(),
             exit_plan_mode: WrappedExitPlanModeTool::new(),
+            ask_user_question: WrappedAskUserQuestionTool::new(),
         };
 
         // 如果启用了 HITL，则包装工具
@@ -412,6 +431,7 @@ struct AllTools {
     search_replace: WrappedSearchReplaceTool,
     enter_plan_mode: WrappedEnterPlanModeTool,
     exit_plan_mode: WrappedExitPlanModeTool,
+    ask_user_question: WrappedAskUserQuestionTool,
 }
 
 /// Agent 枚举 - 支持多种客户端
