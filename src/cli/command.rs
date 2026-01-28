@@ -377,6 +377,12 @@ impl OxideCli {
                     && e.to_string().contains("prompt_cancelled")
                 {
                     println!("{} 操作已取消", "🚫".red());
+                    // 将取消信息保存到对话历史，让 Agent 知道操作被用户拒绝
+                    self.context_manager
+                        .add_message(Message::assistant("[操作已被用户取消]"));
+                    if let Err(e) = self.context_manager.save() {
+                        println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                    }
                 } else {
                     println!("{} Failed to get AI response: {}", "❌".red(), e);
                 }
@@ -508,6 +514,12 @@ impl OxideCli {
                     && e.to_string().contains("prompt_cancelled")
                 {
                     println!("{} 操作已取消", "🚫".red());
+                    // 将取消信息保存到对话历史，让 Agent 知道操作被用户拒绝
+                    self.context_manager
+                        .add_message(Message::assistant("[操作已被用户取消]"));
+                    if let Err(e) = self.context_manager.save() {
+                        println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                    }
                 } else {
                     println!("{} Failed to get AI response: {}", "❌".red(), e);
                     println!(
@@ -1552,6 +1564,12 @@ impl OxideCli {
                     && e.to_string().contains("prompt_cancelled")
                 {
                     println!("{} 操作已取消", "🚫".red());
+                    // 将取消信息保存到对话历史，让 Agent 知道操作被用户拒绝
+                    self.context_manager
+                        .add_message(Message::assistant("[操作已被用户取消]"));
+                    if let Err(e) = self.context_manager.save() {
+                        println!("{} Failed to save context: {}", "⚠️".yellow(), e);
+                    }
                 } else {
                     println!("{} Failed to get AI response: {}", "❌".red(), e);
                 }

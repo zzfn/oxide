@@ -73,12 +73,8 @@ impl HitlIntegration {
 
         // 2. 根据决策处理
         match decision {
-            HitlDecision::ExecuteDirectly { reason } => {
-                println!(
-                    "{} {}",
-                    "✓".green(),
-                    format!("自动批准({}): {}", request.tool_name, reason).dimmed()
-                );
+            HitlDecision::ExecuteDirectly { reason: _ } => {
+                // 对齐 Claude Code 行为：自动批准时静默执行，不输出提示
                 Ok(HitlResult::Approved)
             }
 
