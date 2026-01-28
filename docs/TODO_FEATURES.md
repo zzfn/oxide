@@ -1,90 +1,35 @@
-# Oxide vs Claude Code 功能对比与改进计划
+# Oxide 待实现功能清单
 
 > 最后更新: 2026-01-28
 > 状态: 规划中
 
-本文档记录 Oxide 项目与 Anthropic Claude Code 的功能差距，用于指导后续开发工作。
-
-## 📚 快速导航
-
-- **[已实现功能清单](./IMPLEMENTED_FEATURES.md)** - 查看已完成的功能特性
-- **[待实现功能清单](./TODO_FEATURES.md)** - 查看待开发的功能规划
+本文档记录 Oxide 项目中待实现的功能特性，按优先级排序。
 
 ---
 
-## 📊 功能对比总览
+## 📊 待实现功能总览
 
-| 功能模块 | Claude Code | Oxide | 状态 | 优先级 |
-|---------|-------------|-------|------|--------|
-| **计划模式** | ✅ EnterPlanMode/ExitPlanMode | ✅ 已实现 | 完成 | 🟢 已完成 |
-| **任务管理** | ✅ 完整（依赖、元数据） | ⚠️ 基础框架 | 待完善 | 🔴 高 |
-| **Web 工具** | ✅ WebFetch/WebSearch | ❌ 缺失 | 待实现 | 🟡 中 |
-| **多模态** | ✅ 图片/PDF/Notebook | ⚠️ 部分 | 待完善 | 🟡 中 |
-| **Git 工作流** | ✅ 完整协议 + PR | ⚠️ 基础工具 | 待完善 | 🔴 高 |
-| **子代理系统** | ✅ Task 工具 + 后台运行 | ⚠️ 无自主启动 | 待实现 | 🔴 高 |
-| **用户交互** | ✅ AskUserQuestion | ⚠️ 未集成 | 待集成 | 🟡 中 |
-| **高级编辑** | ✅ MultiEdit/NotebookEdit | ⚠️ 未集成 | 待集成 | 🟢 低 |
-| **Shell 增强** | ✅ 后台执行 + TaskOutput | ⚠️ 基础执行 | 待完善 | 🟡 中 |
-| **MCP 集成** | ✅ 完整支持 | ❌ 未实现 | 待实现 | 🟡 中 |
-| **远程会话** | ✅ 云端协作 | ❌ 缺失 | 待实现 | 🟢 低 |
-| **内置技能** | ✅ 10+ 专业技能 | ⚠️ 3 个基础技能 | 待扩展 | 🟡 中 |
-| **代码引用** | ✅ file:line 格式 | ❌ 未提及 | 待实现 | 🟢 低 |
-| **上下文管理** | ✅ 自动摘要 + 预算 | ⚠️ 基础管理 | 待完善 | 🟡 中 |
-| **Hooks 系统** | ✅ 事件响应 | ❌ 缺失 | 待实现 | 🟢 低 |
+| 功能模块 | 状态 | 优先级 | 预计工作量 |
+|---------|------|--------|-----------|
+| **任务管理系统完善** | ⚠️ 基础框架存在 | 🔴 高 | 中等 |
+| **Task 工具（子代理自主启动）** | ❌ 缺失 | 🔴 高 | 大 |
+| **Git 工作流完善** | ⚠️ 基础工具存在 | 🔴 高 | 中等 |
+| **Web 工具** | ❌ 缺失 | 🟡 中 | 中等 |
+| **多模态支持** | ⚠️ 部分实现 | 🟡 中 | 中等 |
+| **集成已有工具** | ⚠️ 已实现但未集成 | 🟡 中 | 小 |
+| **Shell 后台执行** | ⚠️ 基础执行存在 | 🟡 中 | 中等 |
+| **内置技能扩展** | ⚠️ 基础技能存在 | 🟡 中 | 大（持续） |
+| **上下文自动摘要** | ❌ 缺失 | 🟡 中 | 大 |
+| **MCP 集成** | ❌ 未实现 | 🟢 低 | 大 |
+| **Hooks 系统** | ❌ 缺失 | 🟢 低 | 中等 |
+| **远程会话** | ❌ 缺失 | 🟢 低 | 大 |
+| **代码引用格式** | ❌ 未提及 | 🟢 低 | 小 |
 
 ---
 
 ## 🔴 高优先级功能（核心差距）
 
-### 1. 计划模式系统 ✅
-
-**状态**: ✅ 已实现
-**优先级**: 🟢 已完成
-**实现时间**: 2026-01-28 (commit: 523b0e0)
-
-#### Claude Code 功能
-- `EnterPlanMode` 工具 - 进入计划模式
-- `ExitPlanMode` 工具 - 退出计划模式并请求用户批准
-- 独立的计划文件写入和审批流程
-- 允许的权限提示（allowedPrompts）
-- 计划可推送到远程会话
-
-#### Oxide 实现
-- ✅ `EnterPlanModeTool` - 进入计划模式 (src/tools/plan_mode.rs:231-333)
-- ✅ `ExitPlanModeTool` - 退出计划模式并请求批准 (src/tools/plan_mode.rs:374-615)
-- ✅ `PlanModeManager` - 全局状态管理器 (src/tools/plan_mode.rs:135-199)
-- ✅ `AllowedPrompt` - 权限管理系统 (src/tools/plan_mode.rs:21-42)
-- ✅ 计划文件自动保存到 `.oxide/plans/<plan_id>.md`
-- ✅ 用户交互式审批流程（批准/修改/取消）
-- ✅ 已集成到主 Agent (src/agent/builder.rs:385-386)
-
-#### 实现特性
-1. **计划文件管理**:
-   - 自动生成计划 ID: `plan_YYYYMMDD_HHMMSS`
-   - 保存路径: `.oxide/plans/<plan_id>.md`
-   - Markdown 格式，包含元数据、权限列表、计划内容
-2. **用户审批流程**:
-   - 显示计划内容（超过 2000 字符自动截断）
-   - 显示需要的权限列表
-   - 三选一交互：批准并执行 / 修改计划 / 取消
-   - 支持修改意见输入
-3. **权限管理**:
-   - `AllowedPrompt` 结构（tool + prompt）
-   - 权限验证机制
-   - 批准后保留权限状态
-4. **友好的终端 UI**:
-   - 彩色输出和表格边框
-   - 清晰的状态提示
-   - 完整的单元测试覆盖
-
-#### 相关文件
-- `src/tools/plan_mode.rs` - 完整实现（789 行）
-- `src/agent/builder.rs` - 工具集成
-- `.oxide/plans/` - 计划文件存储目录
-
----
-
-### 2. 任务管理系统完善
+### 1. 任务管理系统完善
 
 **状态**: ⚠️ 基础框架存在
 **优先级**: 🔴 高
@@ -107,7 +52,8 @@
 - ❌ 没有 activeForm（进行中显示文本）
 
 #### 实现建议
-1. **完善数据结构**:
+
+##### 1. 完善数据结构
 ```rust
 pub struct Task {
     pub id: String,
@@ -124,20 +70,20 @@ pub struct Task {
 }
 ```
 
-2. **实现工具**:
-   - `TaskCreate` - 创建任务
-   - `TaskUpdate` - 更新任务（支持增量更新）
-   - `TaskList` - 列出任务（支持过滤）
-   - `TaskGet` - 获取任务详情
+##### 2. 实现工具
+- `TaskCreate` - 创建任务
+- `TaskUpdate` - 更新任务（支持增量更新）
+- `TaskList` - 列出任务（支持过滤）
+- `TaskGet` - 获取任务详情
 
-3. **依赖关系管理**:
-   - 检测循环依赖
-   - 自动解锁被阻塞的任务
-   - 任务完成时通知依赖任务
+##### 3. 依赖关系管理
+- 检测循环依赖
+- 自动解锁被阻塞的任务
+- 任务完成时通知依赖任务
 
-4. **集成到主 Agent**:
-   - 添加到 `AgentBuilder` 的工具列表
-   - 在系统提示词中说明任务管理最佳实践
+##### 4. 集成到主 Agent
+- 添加到 `AgentBuilder` 的工具列表
+- 在系统提示词中说明任务管理最佳实践
 
 #### 相关文件
 - `src/task/` - 完善现有代码
@@ -146,7 +92,7 @@ pub struct Task {
 
 ---
 
-### 3. Task 工具（子代理自主启动）
+### 2. Task 工具（子代理自主启动）
 
 **状态**: ❌ 缺失
 **优先级**: 🔴 高
@@ -176,7 +122,8 @@ pub struct Task {
 - ❌ 没有恢复机制
 
 #### 实现建议
-1. **新增 Task 工具**:
+
+##### 1. 新增 Task 工具
 ```rust
 pub struct TaskTool {
     pub description: String,           // 任务描述（3-5 词）
@@ -189,21 +136,21 @@ pub struct TaskTool {
 }
 ```
 
-2. **后台运行支持**:
-   - 使用 Tokio 异步任务
-   - 输出重定向到文件（`.oxide/tasks/<task_id>.log`）
-   - 提供 `TaskOutput` 工具读取输出
-   - 提供 `TaskStop` 工具停止任务
+##### 2. 后台运行支持
+- 使用 Tokio 异步任务
+- 输出重定向到文件（`.oxide/tasks/<task_id>.log`）
+- 提供 `TaskOutput` 工具读取输出
+- 提供 `TaskStop` 工具停止任务
 
-3. **恢复机制**:
-   - 保存子代理的完整上下文
-   - 支持从上次中断处继续
-   - 恢复时保留历史消息
+##### 3. 恢复机制
+- 保存子代理的完整上下文
+- 支持从上次中断处继续
+- 恢复时保留历史消息
 
-4. **新增专业子代理**:
-   - `Bash` - 专注于命令执行
-   - `QuantAnalyst` - 量化分析
-   - `FeatureDev` 系列 - 功能开发工作流
+##### 4. 新增专业子代理
+- `Bash` - 专注于命令执行
+- `QuantAnalyst` - 量化分析
+- `FeatureDev` 系列 - 功能开发工作流
 
 #### 相关文件
 - `src/tools/task.rs` - 已存在但需重写
@@ -213,7 +160,7 @@ pub struct TaskTool {
 
 ---
 
-### 4. Git 工作流完善
+### 3. Git 工作流完善
 
 **状态**: ⚠️ 基础工具存在
 **优先级**: 🔴 高
@@ -243,27 +190,28 @@ pub struct TaskTool {
 - ❌ 没有自动生成 commit message
 
 #### 实现建议
-1. **完善 git_guard**:
-   - 添加更多安全检查
-   - 检测敏感文件（.env, credentials.json）
-   - 警告大文件提交
 
-2. **实现 Commit 工作流**:
-   - 新增 `/commit` 技能（已有但需完善）
-   - 自动运行 `git status`, `git diff`, `git log`
-   - 生成符合项目风格的 commit message
-   - 添加 Co-Authored-By 标签
+##### 1. 完善 git_guard
+- 添加更多安全检查
+- 检测敏感文件（.env, credentials.json）
+- 警告大文件提交
 
-3. **实现 PR 工作流**:
-   - 新增 `/pr` 技能
-   - 集成 `gh` CLI
-   - 自动生成 PR 描述
-   - 检查 CI 状态
+##### 2. 实现 Commit 工作流
+- 新增 `/commit` 技能（已有但需完善）
+- 自动运行 `git status`, `git diff`, `git log`
+- 生成符合项目风格的 commit message
+- 添加 Co-Authored-By 标签
 
-4. **在系统提示词中添加 Git 协议**:
-   - 详细的安全规则
-   - Commit 最佳实践
-   - PR 创建流程
+##### 3. 实现 PR 工作流
+- 新增 `/pr` 技能
+- 集成 `gh` CLI
+- 自动生成 PR 描述
+- 检查 CI 状态
+
+##### 4. 在系统提示词中添加 Git 协议
+- 详细的安全规则
+- Commit 最佳实践
+- PR 创建流程
 
 #### 相关文件
 - `src/tools/git_guard.rs` - 完善现有代码
@@ -276,7 +224,7 @@ pub struct TaskTool {
 
 ## 🟡 中优先级功能（增强体验）
 
-### 5. Web 工具
+### 4. Web 工具
 
 **状态**: ❌ 缺失
 **优先级**: 🟡 中
@@ -291,7 +239,8 @@ pub struct TaskTool {
 - `WebSearch` - 网页搜索（通过 MCP）
 
 #### 实现建议
-1. **新增 WebFetch 工具**:
+
+##### 1. 新增 WebFetch 工具
 ```rust
 pub struct WebFetchTool {
     pub url: String,
@@ -299,18 +248,18 @@ pub struct WebFetchTool {
 }
 ```
 
-2. **依赖库**:
-   - `reqwest` - HTTP 客户端
-   - `html2text` 或 `scraper` - HTML 解析
-   - `lru` - LRU 缓存
+##### 2. 依赖库
+- `reqwest` - HTTP 客户端
+- `html2text` 或 `scraper` - HTML 解析
+- `lru` - LRU 缓存
 
-3. **功能实现**:
-   - URL 验证和规范化
-   - 自动 HTTPS 升级
-   - 重定向处理（最多 5 次）
-   - HTML 转 Markdown
-   - 缓存机制（15 分钟 TTL）
-   - 用小模型处理内容（节省成本）
+##### 3. 功能实现
+- URL 验证和规范化
+- 自动 HTTPS 升级
+- 重定向处理（最多 5 次）
+- HTML 转 Markdown
+- 缓存机制（15 分钟 TTL）
+- 用小模型处理内容（节省成本）
 
 #### 相关文件
 - `src/tools/web_fetch.rs` - 新增
@@ -318,7 +267,7 @@ pub struct WebFetchTool {
 
 ---
 
-### 6. 多模态支持
+### 5. 多模态支持
 
 **状态**: ⚠️ 部分实现
 **优先级**: 🟡 中
@@ -337,20 +286,21 @@ pub struct WebFetchTool {
 - ⚠️ `enable_multimodal` 配置存在但未实现
 
 #### 实现建议
-1. **扩展 read_file 工具**:
-   - 检测文件类型（MIME type）
-   - 图片文件 → 转为 base64 + 视觉内容
-   - PDF 文件 → 逐页提取文本和图像
-   - Notebook 文件 → 解析 JSON 结构
 
-2. **依赖库**:
-   - `image` - 图片处理
-   - `pdf` 或 `lopdf` - PDF 解析
-   - `base64` - 编码
+##### 1. 扩展 read_file 工具
+- 检测文件类型（MIME type）
+- 图片文件 → 转为 base64 + 视觉内容
+- PDF 文件 → 逐页提取文本和图像
+- Notebook 文件 → 解析 JSON 结构
 
-3. **API 集成**:
-   - 使用 Claude 的视觉 API
-   - 支持多模态消息格式
+##### 2. 依赖库
+- `image` - 图片处理
+- `pdf` 或 `lopdf` - PDF 解析
+- `base64` - 编码
+
+##### 3. API 集成
+- 使用 Claude 的视觉 API
+- 支持多模态消息格式
 
 #### 相关文件
 - `src/tools/read_file.rs` - 扩展现有代码
@@ -359,7 +309,7 @@ pub struct WebFetchTool {
 
 ---
 
-### 7. 集成已有工具
+### 6. 集成已有工具
 
 **状态**: ⚠️ 已实现但未集成
 **优先级**: 🟡 中
@@ -372,7 +322,8 @@ pub struct WebFetchTool {
 4. **search_replace** - 块级代码替换
 
 #### 实现建议
-1. **添加到 AgentBuilder**:
+
+##### 1. 添加到 AgentBuilder
 ```rust
 // src/agent/builder.rs
 pub fn build_main_agent() -> Agent {
@@ -387,9 +338,9 @@ pub fn build_main_agent() -> Agent {
 }
 ```
 
-2. **更新系统提示词**:
-   - 说明新工具的用途
-   - 提供使用示例
+##### 2. 更新系统提示词
+- 说明新工具的用途
+- 提供使用示例
 
 #### 相关文件
 - `src/agent/builder.rs` - 添加工具
@@ -397,7 +348,7 @@ pub fn build_main_agent() -> Agent {
 
 ---
 
-### 8. Shell 后台执行
+### 7. Shell 后台执行
 
 **状态**: ⚠️ 基础执行存在
 **优先级**: 🟡 中
@@ -415,7 +366,8 @@ pub fn build_main_agent() -> Agent {
 - ⚠️ `task_output` 工具存在但未集成
 
 #### 实现建议
-1. **扩展 shell_execute**:
+
+##### 1. 扩展 shell_execute
 ```rust
 pub struct ShellExecuteTool {
     pub command: String,
@@ -425,17 +377,17 @@ pub struct ShellExecuteTool {
 }
 ```
 
-2. **后台任务管理**:
-   - 使用 Tokio spawn
-   - 输出重定向到文件
-   - 返回 task_id
-   - 提供 `TaskOutput` 工具读取输出
-   - 提供 `TaskStop` 工具停止任务
+##### 2. 后台任务管理
+- 使用 Tokio spawn
+- 输出重定向到文件
+- 返回 task_id
+- 提供 `TaskOutput` 工具读取输出
+- 提供 `TaskStop` 工具停止任务
 
-3. **在系统提示词中添加指南**:
-   - 何时使用后台执行
-   - 如何检查任务状态
-   - 避免使用 find/grep/cat 等（用专用工具）
+##### 3. 在系统提示词中添加指南
+- 何时使用后台执行
+- 如何检查任务状态
+- 避免使用 find/grep/cat 等（用专用工具）
 
 #### 相关文件
 - `src/tools/shell_execute.rs` - 扩展现有代码
@@ -444,7 +396,7 @@ pub struct ShellExecuteTool {
 
 ---
 
-### 9. 内置技能扩展
+### 8. 内置技能扩展
 
 **状态**: ⚠️ 基础技能存在
 **优先级**: 🟡 中
@@ -467,30 +419,31 @@ pub struct ShellExecuteTool {
 - ⚠️ 内置技能较少（只有 commit, compact, review）
 
 #### 实现建议
-1. **优先添加的技能**:
-   - `git-workflow` - 完整的 Git 工作流
-   - `code-review` - 代码审查清单
-   - `feature-dev` - 功能开发指南
-   - `skill-creator` - 技能创建指南
 
-2. **技能文件位置**:
-   - `skills/git-workflow.md`
-   - `skills/code-review.md`
-   - `skills/feature-dev.md`
-   - `skills/skill-creator.md`
+##### 1. 优先添加的技能
+- `git-workflow` - 完整的 Git 工作流
+- `code-review` - 代码审查清单
+- `feature-dev` - 功能开发指南
+- `skill-creator` - 技能创建指南
 
-3. **技能内容**:
-   - 详细的步骤说明
-   - 最佳实践
-   - 常见陷阱
-   - 示例
+##### 2. 技能文件位置
+- `skills/git-workflow.md`
+- `skills/code-review.md`
+- `skills/feature-dev.md`
+- `skills/skill-creator.md`
+
+##### 3. 技能内容
+- 详细的步骤说明
+- 最佳实践
+- 常见陷阱
+- 示例
 
 #### 相关文件
 - `skills/` - 添加新技能文件
 
 ---
 
-### 10. 上下文自动摘要
+### 9. 上下文自动摘要
 
 **状态**: ❌ 缺失
 **优先级**: 🟡 中
@@ -508,13 +461,14 @@ pub struct ShellExecuteTool {
 - ❌ 没有预算管理
 
 #### 实现建议
-1. **摘要策略**:
-   - 当消息数超过阈值时触发
-   - 使用小模型（haiku）生成摘要
-   - 保留最近 N 条消息
-   - 将旧消息摘要为单条消息
 
-2. **预算管理**:
+##### 1. 摘要策略
+- 当消息数超过阈值时触发
+- 使用小模型（haiku）生成摘要
+- 保留最近 N 条消息
+- 将旧消息摘要为单条消息
+
+##### 2. 预算管理
 ```rust
 pub struct TokenBudget {
     pub max_tokens: usize,
@@ -523,10 +477,10 @@ pub struct TokenBudget {
 }
 ```
 
-3. **实现流程**:
-   - 每次对话后计算 Token 使用
-   - 接近预算时警告用户
-   - 超过预算时自动摘要
+##### 3. 实现流程
+- 每次对话后计算 Token 使用
+- 接近预算时警告用户
+- 超过预算时自动摘要
 
 #### 相关文件
 - `src/context.rs` - 添加摘要功能
@@ -537,7 +491,7 @@ pub struct TokenBudget {
 
 ## 🟢 低优先级功能（锦上添花）
 
-### 11. MCP 集成
+### 10. MCP 集成
 
 **状态**: ❌ 未实现
 **优先级**: 🟢 低
@@ -555,7 +509,7 @@ pub struct TokenBudget {
 
 ---
 
-### 12. Hooks 系统
+### 11. Hooks 系统
 
 **状态**: ❌ 缺失
 **优先级**: 🟢 低
@@ -567,7 +521,8 @@ pub struct TokenBudget {
 - Hook 反馈被视为用户输入
 
 #### 实现建议
-1. **配置格式**:
+
+##### 1. 配置格式
 ```toml
 [hooks]
 on_prompt_submit = "echo 'User submitted: $PROMPT'"
@@ -575,12 +530,12 @@ on_tool_call = "echo 'Tool called: $TOOL_NAME'"
 on_error = "notify-send 'Error occurred'"
 ```
 
-2. **事件类型**:
-   - `on_prompt_submit` - 用户提交提示
-   - `on_tool_call` - 工具调用
-   - `on_error` - 错误发生
-   - `on_session_start` - 会话开始
-   - `on_session_end` - 会话结束
+##### 2. 事件类型
+- `on_prompt_submit` - 用户提交提示
+- `on_tool_call` - 工具调用
+- `on_error` - 错误发生
+- `on_session_start` - 会话开始
+- `on_session_end` - 会话结束
 
 #### 相关文件
 - `src/hooks/` - 新增模块
@@ -588,7 +543,7 @@ on_error = "notify-send 'Error occurred'"
 
 ---
 
-### 13. 远程会话
+### 12. 远程会话
 
 **状态**: ❌ 缺失
 **优先级**: 🟢 低
@@ -605,7 +560,7 @@ on_error = "notify-send 'Error occurred'"
 
 ---
 
-### 14. 代码引用格式
+### 13. 代码引用格式
 
 **状态**: ❌ 未提及
 **优先级**: 🟢 低
@@ -633,7 +588,6 @@ on_error = "notify-send 'Error occurred'"
 - [ ] 添加 2-3 个常用技能（git-workflow, code-review）
 
 ### Phase 2: 核心功能（3-4 周）
-- [x] ~~实现计划模式系统（EnterPlanMode/ExitPlanMode）~~ ✅ 已完成
 - [ ] 完善任务管理系统（依赖关系、元数据）
 - [ ] 实现 Task 工具（子代理自主启动）
 - [ ] Shell 后台执行支持
@@ -660,7 +614,7 @@ on_error = "notify-send 'Error occurred'"
 - [ ] 内置技能 ≥ 10 个
 
 ### 用户体验
-- [ ] 计划模式可用
+- [x] 计划模式可用 ✅
 - [ ] 任务管理完整
 - [ ] 后台任务支持
 - [ ] 多模态支持
@@ -674,27 +628,16 @@ on_error = "notify-send 'Error occurred'"
 
 ## 📝 更新日志
 
-### 2026-01-28 (更新 2)
-- ✅ 更新计划模式系统状态为"已实现"
-- 添加实现细节和文件引用
-- 更新实施路线图进度
-
-### 2026-01-28 (更新 1)
-- 实现 EnterPlanMode/ExitPlanMode 工具
-- 实现权限管理系统
-- 集成到主 Agent
-
-### 2026-01-28 (初始版本)
+### 2026-01-28
 - 初始版本
-- 完成功能对比分析
-- 制定实施路线图
+- 从功能对比文档中提取待实现功能
+- 按优先级组织功能清单
 
 ---
 
 ## 🔗 相关文档
 
+- [已实现功能清单](./IMPLEMENTED_FEATURES.md)
+- [功能对比总览](./CLAUDE_CODE_COMPARISON.md)
 - [架构文档](./architecture.md)
-- [Agent 系统详解](./agent-system.md)
 - [工具系统详解](./tool-system.md)
-- [PAOR 工作流指南](./PAOR_WORKFLOW.md)
-- [技能系统详解](./skill-system.md)
