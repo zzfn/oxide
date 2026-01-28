@@ -1143,6 +1143,7 @@ impl OxideCli {
                 crate::task::TaskStatus::InProgress => "🔄".bright_blue(),
                 crate::task::TaskStatus::Completed => "✅".bright_green(),
                 crate::task::TaskStatus::Failed => "❌".bright_red(),
+                crate::task::TaskStatus::Deleted => "🗑️".dimmed(),
             };
 
             println!("  {} {} ({})", status_icon, task.name.bright_white(), task.id.dimmed());
@@ -1192,6 +1193,7 @@ impl OxideCli {
             TaskStatus::InProgress => "🔄".bright_blue(),
             TaskStatus::Completed => "✅".bright_green(),
             TaskStatus::Failed => "❌".bright_red(),
+            TaskStatus::Deleted => "🗑️".dimmed(),
         };
 
         println!("{}", "📋 Task Details:".bright_cyan());
@@ -1308,6 +1310,13 @@ impl OxideCli {
             crate::task::TaskStatus::Failed => {
                 println!(
                     "{} Task '{}' has already failed",
+                    "ℹ️".bright_blue(),
+                    task_id
+                );
+            }
+            crate::task::TaskStatus::Deleted => {
+                println!(
+                    "{} Task '{}' has been deleted",
                     "ℹ️".bright_blue(),
                     task_id
                 );

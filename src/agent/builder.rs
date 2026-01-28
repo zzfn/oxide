@@ -10,6 +10,7 @@ use crate::tools::{
     WrappedEditFileTool, WrappedGlobTool, WrappedGrepSearchTool, WrappedReadFileTool,
     WrappedScanCodebaseTool, WrappedWriteFileTool, WrappedShellExecuteTool,
     WrappedSearchReplaceTool, WrappedEnterPlanModeTool, WrappedExitPlanModeTool,
+    WrappedTaskCreateTool, WrappedTaskUpdateTool, WrappedTaskListTool, WrappedTaskGetTool,
 };
 use anyhow::Result;
 use rig::agent::Agent;
@@ -109,7 +110,14 @@ Use ask_user_question when you need to:
 - Clarify ambiguous instructions
 - Get decisions on implementation choices
 - Offer choices about what direction to take
-Users can always select "Other" to provide custom input. Use multiSelect: true to allow multiple answers."#)
+Users can always select "Other" to provide custom input. Use multiSelect: true to allow multiple answers.
+
+【Task Management】
+Use task management tools (task_create, task_update, task_list, task_get) to track progress on complex tasks:
+- Create tasks for multi-step work to show progress to the user
+- Update task status as you work (pending → in_progress → completed)
+- Use task dependencies (blocks/blocked_by) to manage task ordering
+- Mark tasks as completed when done, or deleted if no longer needed"#)
                 .max_tokens(4096)
                 .tool(MaybeHitlTool::new(tools.read_file, self.hitl.clone()))
                 .tool(MaybeHitlTool::new(tools.write_file, self.hitl.clone()))
@@ -123,6 +131,10 @@ Users can always select "Other" to provide custom input. Use multiSelect: true t
                 .tool(tools.enter_plan_mode)
                 .tool(tools.exit_plan_mode)
                 .tool(tools.ask_user_question)
+                .tool(tools.task_create)
+                .tool(tools.task_update)
+                .tool(tools.task_list)
+                .tool(tools.task_get)
                 .build();
 
             Ok(AgentEnum::Anthropic(agent))
@@ -164,7 +176,14 @@ Use ask_user_question when you need to:
 - Clarify ambiguous instructions
 - Get decisions on implementation choices
 - Offer choices about what direction to take
-Users can always select "Other" to provide custom input. Use multiSelect: true to allow multiple answers."#)
+Users can always select "Other" to provide custom input. Use multiSelect: true to allow multiple answers.
+
+【Task Management】
+Use task management tools (task_create, task_update, task_list, task_get) to track progress on complex tasks:
+- Create tasks for multi-step work to show progress to the user
+- Update task status as you work (pending → in_progress → completed)
+- Use task dependencies (blocks/blocked_by) to manage task ordering
+- Mark tasks as completed when done, or deleted if no longer needed"#)
                 .max_tokens(4096)
                 .tool(MaybeHitlTool::new(tools.read_file, self.hitl.clone()))
                 .tool(MaybeHitlTool::new(tools.write_file, self.hitl.clone()))
@@ -179,6 +198,10 @@ Users can always select "Other" to provide custom input. Use multiSelect: true t
                 .tool(tools.enter_plan_mode)
                 .tool(tools.exit_plan_mode)
                 .tool(tools.ask_user_question)
+                .tool(tools.task_create)
+                .tool(tools.task_update)
+                .tool(tools.task_list)
+                .tool(tools.task_get)
                 .build();
 
             Ok(AgentEnum::OpenAI(agent))
@@ -403,6 +426,11 @@ Users can always select "Other" to provide custom input. Use multiSelect: true t
             enter_plan_mode: WrappedEnterPlanModeTool::new(),
             exit_plan_mode: WrappedExitPlanModeTool::new(),
             ask_user_question: WrappedAskUserQuestionTool::new(),
+            // 任务管理工具
+            task_create: WrappedTaskCreateTool::new(),
+            task_update: WrappedTaskUpdateTool::new(),
+            task_list: WrappedTaskListTool::new(),
+            task_get: WrappedTaskGetTool::new(),
         };
 
         // 如果启用了 HITL，则包装工具
@@ -432,6 +460,11 @@ struct AllTools {
     enter_plan_mode: WrappedEnterPlanModeTool,
     exit_plan_mode: WrappedExitPlanModeTool,
     ask_user_question: WrappedAskUserQuestionTool,
+    // 任务管理工具
+    task_create: WrappedTaskCreateTool,
+    task_update: WrappedTaskUpdateTool,
+    task_list: WrappedTaskListTool,
+    task_get: WrappedTaskGetTool,
 }
 
 /// Agent 枚举 - 支持多种客户端

@@ -12,6 +12,7 @@
 | 功能模块 | 实现时间 | 相关文件 | 测试覆盖 |
 |---------|---------|---------|---------|
 | **计划模式系统** | 2026-01-28 | src/tools/plan_mode.rs | ✅ 完整 |
+| **任务管理系统** | 2026-01-28 | src/task/manager.rs, src/tools/task_*.rs | ✅ 完整 |
 
 ---
 
@@ -192,9 +193,142 @@ mod tests {
 
 ---
 
+### 2. 任务管理系统 (Task Management)
+
+**实现时间**: 2026-01-28
+**对标**: Claude Code TaskCreate/TaskUpdate/TaskList/TaskGet
+
+#### 功能描述
+
+任务管理系统允许 Agent 创建、跟踪和管理结构化的任务列表。支持任务依赖关系、状态管理和元数据存储，帮助用户和 Agent 更好地组织复杂的多步骤工作。
+
+#### 核心组件
+
+1. **TaskManager** (src/task/manager.rs:228-545)
+   - 全局单例模式
+   - 任务 CRUD 操作
+   - 依赖关系管理
+   - 循环依赖检测
+   - 持久化存储
+
+2. **TaskCreateTool** (src/tools/task_create.rs)
+   - 创建新任务
+   - 支持元数据
+   - 自动生成 UUID
+
+3. **TaskUpdateTool** (src/tools/task_update.rs)
+   - 更新任务状态
+   - 修改任务属性
+   - 管理依赖关系
+
+4. **TaskListTool** (src/tools/task_list.rs)
+   - 列出所有任务
+   - 过滤已删除任务
+   - 显示阻塞状态
+
+5. **TaskGetTool** (src/tools/task_get.rs)
+   - 获取任务详情
+   - 完整的任务信息
+
+#### 实现特性
+
+##### 1. 任务状态管理
+```
+pending → in_progress → completed
+                     → failed
+                     → deleted
+```
+
+##### 2. 依赖关系
+- `blocks`: 本任务阻塞的其他任务
+- `blocked_by`: 阻塞本任务的其他任务
+- DFS 循环依赖检测
+
+##### 3. 持久化存储
+- 存储路径: `.oxide/tasks/<task_id>.json`
+- JSON 格式
+- 跨会话持久化
+
+##### 4. 数据结构
+```rust
+pub struct Task {
+    pub id: TaskId,
+    pub subject: String,
+    pub description: String,
+    pub active_form: Option<String>,
+    pub status: TaskStatus,
+    pub owner: Option<String>,
+    pub blocks: Vec<TaskId>,
+    pub blocked_by: Vec<TaskId>,
+    pub metadata: HashMap<String, Value>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    // ...
+}
+```
+
+#### 集成状态
+
+- ✅ 已集成到主 Agent (src/agent/builder.rs)
+- ✅ 工具定义完整
+- ✅ 单元测试覆盖（31 个测试用例）
+
+#### 测试覆盖
+
+```rust
+// src/task/manager.rs 测试
+#[test] fn test_task_creation()
+#[test] fn test_task_with_agent()
+#[test] fn test_task_status_transitions()
+#[test] fn test_task_deleted_status()
+#[test] fn test_task_manager_simple()
+#[test] fn test_task_manager_with_agent()
+#[test] fn test_task_persistence()
+#[test] fn test_task_dependencies()
+#[test] fn test_cycle_detection()
+#[test] fn test_available_tasks()
+
+// src/tools/task_*.rs 测试
+#[test] fn test_task_create_args_deserialization()
+#[test] fn test_task_update_args_deserialization()
+#[test] fn test_task_list_args_deserialization()
+#[test] fn test_task_get_args_deserialization()
+// ...
+```
+
+#### 相关文件
+
+- `src/task/manager.rs` - TaskManager 和 Task 结构体
+- `src/tools/task_create.rs` - TaskCreate 工具
+- `src/tools/task_update.rs` - TaskUpdate 工具
+- `src/tools/task_list.rs` - TaskList 工具
+- `src/tools/task_get.rs` - TaskGet 工具
+- `.oxide/tasks/` - 任务存储目录
+
+#### 与 Claude Code 的对比
+
+| 特性 | Claude Code | Oxide | 说明 |
+|-----|-------------|-------|------|
+| TaskCreate | ✅ | ✅ | 完全实现 |
+| TaskUpdate | ✅ | ✅ | 完全实现 |
+| TaskList | ✅ | ✅ | 完全实现 |
+| TaskGet | ✅ | ✅ | 完全实现 |
+| 任务依赖 | ✅ | ✅ | blocks/blocked_by |
+| 循环检测 | ✅ | ✅ | DFS 算法 |
+| 持久化 | ✅ | ✅ | JSON 文件 |
+| 元数据 | ✅ | ✅ | HashMap |
+
+#### 详细文档
+
+完整的 API 文档和使用指南请参考 [任务管理系统详解](./TASK_MANAGEMENT.md)。
+
+---
+
 ## 📝 更新日志
 
 ### 2026-01-28
+- ✅ 实现任务管理系统（TaskCreate/TaskUpdate/TaskList/TaskGet）
+- ✅ 实现任务依赖关系和循环检测
 - ✅ 实现计划模式系统（EnterPlanMode/ExitPlanMode）
 - ✅ 实现权限管理系统（AllowedPrompt）
 - ✅ 集成到主 Agent
@@ -204,6 +338,7 @@ mod tests {
 
 ## 🔗 相关文档
 
+- [任务管理系统详解](./TASK_MANAGEMENT.md)
 - [待实现功能清单](./TODO_FEATURES.md)
 - [功能对比总览](./CLAUDE_CODE_COMPARISON.md)
 - [架构文档](./architecture.md)

@@ -35,6 +35,10 @@ pub mod search_replace;
 pub mod shell_execute;
 pub mod task;
 pub mod task_output;
+pub mod task_create;
+pub mod task_update;
+pub mod task_list;
+pub mod task_get;
 
 pub use ask_user_question::WrappedAskUserQuestionTool;
 pub use create_directory::WrappedCreateDirectoryTool;
@@ -50,5 +54,8 @@ pub use write_file::WrappedWriteFileTool;
 pub use shell_execute::WrappedShellExecuteTool;
 pub use search_replace::WrappedSearchReplaceTool;
 
-// task 和 task_output 模块暂未集成到主 Agent
-// 这些工具将在未来版本中使用
+// 任务管理工具
+pub use task_create::WrappedTaskCreateTool;
+pub use task_update::WrappedTaskUpdateTool;
+pub use task_list::WrappedTaskListTool;
+pub use task_get::WrappedTaskGetTool;
