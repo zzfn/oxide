@@ -492,7 +492,7 @@ impl Prompt for OxidePrompt {
 
 /// 左侧提示符标签
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PromptLabel {
+pub(crate) enum PromptLabel {
     Oxide,
     Fast,
     Plan,
@@ -800,7 +800,12 @@ impl OxideCli {
             let final_input = match readline {
                 Ok(Signal::Success(line)) => {
                     if line == PROMPT_CYCLE_COMMAND {
+                        let old_label = self.prompt_label;
                         self.prompt_label = self.prompt_label.next();
+
+                        // 显示模式切换提示
+                        self.show_mode_switch_hint(old_label, self.prompt_label);
+
                         skip_separator = true;
                         continue;
                     }
@@ -862,6 +867,33 @@ impl OxideCli {
 
     fn add_session_tokens(&self, tokens: u64) {
         self.total_tokens.fetch_add(tokens, Ordering::Relaxed);
+    }
+
+    /// 显示模式切换提示
+    fn show_mode_switch_hint(&self, _old_label: PromptLabel, new_label: PromptLabel) {
+        use colored::Colorize;
+
+        match new_label {
+            PromptLabel::Plan => {
+                println!();
+                println!("{}", "📋 已切换到 Plan 模式".bright_cyan().bold());
+                println!("{}", "   所有任务将使用 PAOR 工作流处理".bright_white());
+                println!("{}", "   Planning → Acting → Observing → Reflecting".dimmed());
+                println!();
+            }
+            PromptLabel::Fast => {
+                println!();
+                println!("{}", "⚡ 已切换到 Fast 模式".bright_yellow().bold());
+                println!("{}", "   使用快速响应模式".bright_white());
+                println!();
+            }
+            PromptLabel::Oxide => {
+                println!();
+                println!("{}", "🦀 已切换到 Oxide 模式".bright_green().bold());
+                println!("{}", "   使用标准对话模式".bright_white());
+                println!();
+            }
+        }
     }
 }
 

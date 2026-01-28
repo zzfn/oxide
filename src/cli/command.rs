@@ -140,8 +140,11 @@ impl OxideCli {
                 println!("{} Type /help for available commands", "💡".bright_blue());
             }
             _ => {
+                // 检查是否处于 Plan 模式
+                let force_workflow = self.is_plan_mode();
+
                 // 评估任务复杂度
-                let use_workflow = self.complexity_evaluator.should_use_workflow(input);
+                let use_workflow = force_workflow || self.complexity_evaluator.should_use_workflow(input);
 
                 if use_workflow {
                     // 使用 PAOR 工作流处理复杂任务
@@ -171,7 +174,13 @@ impl OxideCli {
     /// 使用 PAOR 工作流处理复杂任务
     async fn handle_with_workflow(&mut self, input: &str) -> Result<()> {
         println!();
-        println!("{}", "🤖 检测到复杂任务，启用 PAOR 工作流引擎".bright_cyan());
+
+        // 根据模式显示不同的提示
+        if self.is_plan_mode() {
+            println!("{}", "📋 Plan 模式 - 使用 PAOR 工作流引擎".bright_cyan());
+        } else {
+            println!("{}", "🤖 检测到复杂任务，启用 PAOR 工作流引擎".bright_cyan());
+        }
         println!();
 
         // 处理文件引用
@@ -254,6 +263,13 @@ impl OxideCli {
 
         match result {
             Ok(workflow_result) => {
+                // 在 Plan 模式下保存计划到文件
+                if self.is_plan_mode() {
+                    if let Err(e) = self.save_plan_to_file(&workflow_result) {
+                        println!("{} 保存计划文件失败: {}", "⚠️".yellow(), e);
+                    }
+                }
+
                 // 显示工作流结果
                 if workflow_result.success {
                     println!("{}", "✅ 工作流执行成功".bright_green());
@@ -1598,5 +1614,65 @@ impl OxideCli {
             }
         }
         println!();
+    }
+
+    /// 检查是否处于 Plan 模式
+    pub(crate) fn is_plan_mode(&self) -> bool {
+        self.prompt_label == super::PromptLabel::Plan
+    }
+
+    /// 保存计划到文件
+    fn save_plan_to_file(&self, workflow_result: &WorkflowResult) -> Result<()> {
+        use std::fs;
+        use std::path::PathBuf;
+        use chrono::Local;
+
+        // 创建 .oxide/plans 目录
+        let plans_dir = PathBuf::from(".oxide/plans");
+        fs::create_dir_all(&plans_dir)?;
+
+        // 生成文件名：plan_<timestamp>.md
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        let filename = format!("plan_{}.md", timestamp);
+        let filepath = plans_dir.join(&filename);
+
+        // 构建计划内容
+        let mut content = String::new();
+        content.push_str(&format!("# 工作流计划\n\n"));
+        content.push_str(&format!("> 生成时间: {}\n", Local::now().format("%Y-%m-%d %H:%M:%S")));
+        content.push_str(&format!("> 会话 ID: {}\n", self.context_manager.session_id()));
+        content.push_str(&format!("> 状态: {}\n\n", if workflow_result.success { "✅ 成功" } else { "⚠️ 未完成" }));
+
+        content.push_str("---\n\n");
+
+        content.push_str("## 📊 执行统计\n\n");
+        content.push_str(&format!("- **迭代次数**: {}\n", workflow_result.iterations));
+        content.push_str(&format!("- **最终阶段**: {}\n", workflow_result.phase));
+        if let Some(ref reason) = workflow_result.failure_reason {
+            content.push_str(&format!("- **失败原因**: {}\n", reason));
+        }
+        content.push_str("\n");
+
+        content.push_str("---\n\n");
+
+        content.push_str("## 📋 工作流摘要\n\n");
+        content.push_str(&workflow_result.summary);
+        content.push_str("\n\n");
+
+        if let Some(ref response) = workflow_result.final_response {
+            content.push_str("---\n\n");
+            content.push_str("## 📝 最终响应\n\n");
+            content.push_str(response);
+            content.push_str("\n");
+        }
+
+        // 写入文件
+        fs::write(&filepath, content)?;
+
+        println!();
+        println!("{} 计划已保存到: {}", "💾".bright_blue(), filepath.display().to_string().bright_cyan());
+        println!();
+
+        Ok(())
     }
 }
