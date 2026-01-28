@@ -1,0 +1,20 @@
+#!/bin/bash
+# 手动测试脚本 - 在真实终端中运行
+
+echo "=== 手动测试指南 ==="
+echo ""
+echo "1. 运行: cargo run --example statusbar_test"
+echo "2. 观察底部是否出现灰色状态栏"
+echo "3. 输入几条消息，观察："
+echo "   - 状态栏是否保持固定在底部"
+echo "   - 计数器是否更新"
+echo "   - 对话内容是否在上方正常滚动"
+echo "4. 输入 'check' 测试滚动区域保护"
+echo "5. 按 Ctrl+D 退出"
+echo ""
+echo "预期结果："
+echo "✓ 状态栏固定在底部，不随内容滚动"
+echo "✓ 输入多行后，状态栏仍在底部"
+echo "✓ 退出后终端状态正常恢复"
+echo ""
+echo "如果看到问题，记录现象并报告"
