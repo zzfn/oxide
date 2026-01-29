@@ -134,32 +134,32 @@ impl MarkdownStreamRenderer {
     fn print_in_scroll_region(text: &str) {
         let mut stdout = stdout();
         if let Ok((width, height)) = terminal::size() {
-            // 滚动区域底部（与 mod.rs 中的设置一致：height - 5）
-            let scroll_bottom = height.saturating_sub(5);
+            // 滚动区域底部行号（height-6 是响应区最后一行）
+            let scroll_bottom = height.saturating_sub(6);
+            // 输入框行
+            let input_row = height.saturating_sub(4);
 
-            // 保存光标位置
-            let _ = queue!(stdout, cursor::SavePosition);
-
-            // 设置滚动区域（确保 ScrollUp 只影响这个区域）
-            let _ = write!(stdout, "\x1b[1;{}r", scroll_bottom);
+            // 设置滚动区域（1 到 height-5，不包含输入框区域）
+            let scroll_region_bottom = height.saturating_sub(5);
+            let _ = write!(stdout, "\x1b[1;{}r", scroll_region_bottom);
 
             // 移动到滚动区域底部
-            let _ = queue!(stdout, MoveTo(0, scroll_bottom.saturating_sub(1)));
+            let _ = queue!(stdout, MoveTo(0, scroll_bottom));
 
             // 滚动一行
             let _ = queue!(stdout, ScrollUp(1));
 
             // 移动到滚动区域底部并清除该行
-            let _ = queue!(stdout, MoveTo(0, scroll_bottom.saturating_sub(1)));
+            let _ = queue!(stdout, MoveTo(0, scroll_bottom));
             let _ = queue!(stdout, Clear(ClearType::CurrentLine));
 
             // 打印文本（截断过长的文本）
             let text_display: String = text.chars().take(width as usize).collect();
             let _ = queue!(stdout, crossterm::style::Print(&text_display));
 
-            // 保持滚动区域设置（不要恢复为整个终端）
-            // 恢复光标位置
-            let _ = queue!(stdout, cursor::RestorePosition);
+            // 将光标移回输入框位置（不使用 SavePosition/RestorePosition）
+            let _ = queue!(stdout, MoveTo(3, input_row)); // 3 = "│● " 的位置
+
             let _ = stdout.flush();
         } else {
             // 回退到普通输出
@@ -317,6 +317,7 @@ where
     // 用户输入缓存
     let mut pending_input = String::new();
     let mut cursor_pos: usize = 0;
+    let mut input_dirty = false; // 标记输入是否需要重新渲染
 
     // 启用 raw mode 以监听键盘输入
     let _ = terminal::enable_raw_mode();
@@ -350,9 +351,6 @@ where
     let mut renderer = MarkdownStreamRenderer::new();
     let skin = get_mad_skin();
 
-    // 初始渲染输入框
-    render_pending_input(&pending_input, cursor_pos);
-
     // 键盘事件检查定时器
     let mut keyboard_ticker = interval(Duration::from_millis(16)); // ~60fps
 
@@ -378,9 +376,6 @@ where
 
                         // 使用 Markdown 渲染器处理文本
                         renderer.process_text(&text.text, skin);
-
-                        // 重新渲染输入框（保持用户输入可见）
-                        render_pending_input(&pending_input, cursor_pos);
                     }
                     Some(Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(r)))) => {
                         if first_content {
@@ -394,7 +389,6 @@ where
                         }
                         let reasoning = r.reasoning.join("\n");
                         MarkdownStreamRenderer::print_in_scroll_region(&reasoning.dimmed().to_string());
-                        render_pending_input(&pending_input, cursor_pos);
                     }
                     Some(Ok(MultiTurnStreamItem::FinalResponse(res))) => {
                         final_res = res;
@@ -441,7 +435,7 @@ where
                                     .unwrap_or(pending_input.len());
                                 pending_input.insert(byte_pos, c);
                                 cursor_pos += 1;
-                                render_pending_input(&pending_input, cursor_pos);
+                                input_dirty = true;
                             }
                             // 退格键
                             (KeyCode::Backspace, _) => {
@@ -453,7 +447,7 @@ where
                                         .map(|(i, _)| i)
                                         .unwrap_or(pending_input.len());
                                     pending_input.remove(byte_pos);
-                                    render_pending_input(&pending_input, cursor_pos);
+                                    input_dirty = true;
                                 }
                             }
                             // 删除键
@@ -466,14 +460,14 @@ where
                                         .map(|(i, _)| i)
                                         .unwrap_or(pending_input.len());
                                     pending_input.remove(byte_pos);
-                                    render_pending_input(&pending_input, cursor_pos);
+                                    input_dirty = true;
                                 }
                             }
                             // 左箭头
                             (KeyCode::Left, _) => {
                                 if cursor_pos > 0 {
                                     cursor_pos -= 1;
-                                    render_pending_input(&pending_input, cursor_pos);
+                                    input_dirty = true;
                                 }
                             }
                             // 右箭头
@@ -481,22 +475,28 @@ where
                                 let char_count = pending_input.chars().count();
                                 if cursor_pos < char_count {
                                     cursor_pos += 1;
-                                    render_pending_input(&pending_input, cursor_pos);
+                                    input_dirty = true;
                                 }
                             }
                             // Home
                             (KeyCode::Home, _) => {
                                 cursor_pos = 0;
-                                render_pending_input(&pending_input, cursor_pos);
+                                input_dirty = true;
                             }
                             // End
                             (KeyCode::End, _) => {
                                 cursor_pos = pending_input.chars().count();
-                                render_pending_input(&pending_input, cursor_pos);
+                                input_dirty = true;
                             }
                             _ => {}
                         }
                     }
+                }
+
+                // 只在输入有变化时才重新渲染
+                if input_dirty {
+                    render_pending_input(&pending_input, cursor_pos);
+                    input_dirty = false;
                 }
             }
         }
