@@ -133,11 +133,12 @@ impl MarkdownStreamRenderer {
         self.buffer.push_str(text);
     }
 
-    /// 在滚动区域内打印一行
+    /// 在滚动区域内打印一行（会滚动）
+    /// 布局：[0..height-6] 响应区 | [height-5] 上边框 | [height-4] 输入框 | [height-3] 下边框 | [height-2] 间距 | [height-1] 状态栏
     fn print_in_scroll_region(text: &str) {
         let mut stdout = stdout();
         if let Ok((_, height)) = terminal::size() {
-            let scroll_bottom = height.saturating_sub(3);
+            let scroll_bottom = height.saturating_sub(6);
 
             let _ = queue!(stdout, cursor::SavePosition);
             let _ = queue!(stdout, MoveTo(0, scroll_bottom));
@@ -150,6 +151,25 @@ impl MarkdownStreamRenderer {
         } else {
             // 回退到普通输出
             print!("{}", text);
+            let _ = stdout.flush();
+        }
+    }
+
+    /// 在滚动区域底部原地更新（不滚动，用于 spinner 动画）
+    fn print_at_scroll_bottom(text: &str) {
+        let mut stdout = stdout();
+        if let Ok((_, height)) = terminal::size() {
+            let scroll_bottom = height.saturating_sub(6);
+
+            let _ = queue!(stdout, cursor::SavePosition);
+            let _ = queue!(stdout, MoveTo(0, scroll_bottom));
+            let _ = queue!(stdout, Clear(ClearType::CurrentLine));
+            let _ = queue!(stdout, crossterm::style::Print(text));
+            let _ = queue!(stdout, cursor::RestorePosition);
+            let _ = stdout.flush();
+        } else {
+            // 回退到普通输出
+            print!("\r{}", text);
             let _ = stdout.flush();
         }
     }
@@ -218,12 +238,12 @@ where
             tokio::select! {
                 _ = &mut stop_spinner_rx => {
                     // 停止 spinner，显示静态图标
-                    MarkdownStreamRenderer::print_in_scroll_region(&format!("● oxide: "));
+                    MarkdownStreamRenderer::print_at_scroll_bottom(&format!("● oxide: "));
                     break;
                 }
                 _ = ticker.tick() => {
                     let spinner = SPINNER_FRAMES[frame % SPINNER_FRAMES.len()];
-                    MarkdownStreamRenderer::print_in_scroll_region(&format!("{} oxide:", spinner.blue()));
+                    MarkdownStreamRenderer::print_at_scroll_bottom(&format!("{} oxide:", spinner.blue()));
                     frame += 1;
                 }
             }
