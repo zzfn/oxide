@@ -95,7 +95,6 @@ impl Spinner {
 
 /// Markdown 流式渲染器
 struct MarkdownStreamRenderer {
-    buffer: String,
     line_buffer: String,
     in_code_block: bool,
     in_list: bool,
@@ -104,7 +103,6 @@ struct MarkdownStreamRenderer {
 impl MarkdownStreamRenderer {
     fn new() -> Self {
         Self {
-            buffer: String::new(),
             line_buffer: String::new(),
             in_code_block: false,
             in_list: false,
@@ -128,9 +126,6 @@ impl MarkdownStreamRenderer {
                 self.flush_line(skin);
             }
         }
-
-        // 将文本添加到缓冲区，用于最终渲染
-        self.buffer.push_str(text);
     }
 
     /// 在滚动区域内打印一行（会滚动）
