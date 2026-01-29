@@ -359,7 +359,6 @@ grep-searcher = "0.1"
 grep-regex = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 names = { version = "0.14.0", default-features = false }
-reedline = { version = "0.38", optional = true }
 colored = { version = "3.0", optional = true }
 inquire = { version = "0.7", optional = true, features = ["fuzzy"] }
 termimad = { version = "0.30", optional = true }

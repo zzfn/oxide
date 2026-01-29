@@ -407,7 +407,6 @@ oxide/
 
 - [ ] **Prompt 样式优化**
   - 添加颜色样式到 prompt（会话 ID、Agent 类型、Token 计数）
-  - 使用 `reedline::Style` 实现更丰富的视觉效果
   - 支持自定义颜色主题
 
 - [ ] **Prompt 信息扩展**

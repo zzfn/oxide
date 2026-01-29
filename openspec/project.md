@@ -10,7 +10,6 @@ Oxide 是一个支持任意 AI 模型的通用 AI Agent CLI 工具，提供对�
 - **reqwest** (v0.12) - HTTP 客户端，支持与多种 AI 提供商 API 交互
 - **serde/serde_json** (v1.0) - 序列化和反序列化，用于 API 请求响应
 - **toml** (v0.8) - TOML 配置文件解析
-- **reedline** (v0.38) - 命令行界面库
 - **dotenv** (v0.15) - 环境变量加载（API Keys、配置等）
 - **colored** (v3.0) - 终端颜色输出
 - **anyhow** (v1.0) - 错误处理

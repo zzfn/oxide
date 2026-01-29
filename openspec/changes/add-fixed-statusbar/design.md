@@ -56,7 +56,7 @@ impl StatusBar {
         use crossterm::{cursor, execute};
         let mut sw = stdout();
 
-        // 1. 保存 reedline 的光标位置
+        // 1. 保存输入行的光标位置
         execute!(sw, cursor::SavePosition)?;
 
         // 2. 瞬移到最后一行
@@ -66,7 +66,7 @@ impl StatusBar {
         let status_line = self.format_status(data);
         print!("\x1b[48;5;238m{}\x1b[0K\x1b[0m", status_line);
 
-        // 4. 恢复光标到 reedline 输入位置
+        // 4. 恢复光标到输入行位置
         execute!(sw, cursor::RestorePosition)?;
         sw.flush()?;
         Ok(())
