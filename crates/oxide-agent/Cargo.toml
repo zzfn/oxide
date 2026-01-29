@@ -1,0 +1,18 @@
+[package]
+name = "oxide-agent"
+version = "0.1.0"
+edition = "2021"
+description = "代理和子代理系统"
+
+[dependencies]
+oxide-core = { path = "../oxide-core" }
+oxide-provider = { path = "../oxide-provider" }
+oxide-tools = { path = "../oxide-tools" }
+tokio = { version = "1.40", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "1.0"
+async-trait = "0.1"
+futures = "0.3"
+uuid = { version = "1.0", features = ["v4", "serde"] }
