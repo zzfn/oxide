@@ -1,18 +1,20 @@
 pub mod command;
 pub mod file_resolver;
 pub mod render;
+pub mod statusbar;
 
 use anyhow::Result;
 use colored::*;
-use nu_ansi_term::{Color, Style};
 use inquire::Select;
-use reedline::{
-    default_emacs_keybindings, Completer, DescriptionMode, EditCommand, Emacs, IdeMenu, KeyCode,
-    KeyModifiers, MenuBuilder, Prompt, PromptEditMode, Reedline, ReedlineEvent, ReedlineMenu,
-    Signal, Span, Suggestion,
+use crossterm::{
+    cursor::{self, MoveToColumn},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    queue,
+    style::{Color as CtColor, Print, ResetColor, SetForegroundColor, SetBackgroundColor},
+    terminal::{self, Clear, ClearType},
 };
-use std::borrow::Cow;
 use std::collections::HashMap;
+use std::io::{stdout, Write, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -21,6 +23,330 @@ use std::time::{Duration, Instant};
 use crate::context::ContextManager;
 
 const PROMPT_CYCLE_COMMAND: &str = "__oxide_prompt_cycle__";
+
+// ============================================================================
+// crossterm 行编辑器实现
+// ============================================================================
+
+/// 输入信号类型
+enum Signal {
+    /// 成功提交输入
+    Success(String),
+    /// Ctrl+C 中断
+    CtrlC,
+    /// Ctrl+D 退出
+    CtrlD,
+}
+
+/// 文本范围
+#[derive(Clone, Copy)]
+struct Span {
+    start: usize,
+    end: usize,
+}
+
+impl Span {
+    fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+}
+
+/// 补全建议
+struct Suggestion {
+    value: String,
+    description: Option<String>,
+    span: Span,
+}
+
+/// 行编辑器
+struct LineEditor {
+    buffer: String,
+    /// 光标位置（字符索引，不是字节索引）
+    cursor_pos: usize,
+    history: Vec<String>,
+    history_index: Option<usize>,
+}
+
+impl LineEditor {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+            cursor_pos: 0,
+            history: Vec::new(),
+            history_index: None,
+        }
+    }
+
+    /// 获取光标位置对应的字节索引
+    fn cursor_byte_pos(&self) -> usize {
+        self.buffer
+            .char_indices()
+            .nth(self.cursor_pos)
+            .map(|(i, _)| i)
+            .unwrap_or(self.buffer.len())
+    }
+
+    /// 获取字符数量
+    fn char_count(&self) -> usize {
+        self.buffer.chars().count()
+    }
+
+    fn insert_char(&mut self, c: char) {
+        let byte_pos = self.cursor_byte_pos();
+        self.buffer.insert(byte_pos, c);
+        self.cursor_pos += 1;
+    }
+
+    fn delete_char(&mut self) {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+            let byte_pos = self.cursor_byte_pos();
+            self.buffer.remove(byte_pos);
+        }
+    }
+
+    fn delete_char_forward(&mut self) {
+        if self.cursor_pos < self.char_count() {
+            let byte_pos = self.cursor_byte_pos();
+            self.buffer.remove(byte_pos);
+        }
+    }
+
+    fn move_left(&mut self) {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+        }
+    }
+
+    fn move_right(&mut self) {
+        if self.cursor_pos < self.char_count() {
+            self.cursor_pos += 1;
+        }
+    }
+
+    fn move_home(&mut self) {
+        self.cursor_pos = 0;
+    }
+
+    fn move_end(&mut self) {
+        self.cursor_pos = self.char_count();
+    }
+
+    fn history_up(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+        match self.history_index {
+            None => {
+                self.history_index = Some(self.history.len() - 1);
+            }
+            Some(i) if i > 0 => {
+                self.history_index = Some(i - 1);
+            }
+            _ => return,
+        }
+        if let Some(i) = self.history_index {
+            self.buffer = self.history[i].clone();
+            self.cursor_pos = self.char_count();
+        }
+    }
+
+    fn history_down(&mut self) {
+        match self.history_index {
+            Some(i) if i < self.history.len() - 1 => {
+                self.history_index = Some(i + 1);
+                self.buffer = self.history[i + 1].clone();
+                self.cursor_pos = self.char_count();
+            }
+            Some(_) => {
+                self.history_index = None;
+                self.buffer.clear();
+                self.cursor_pos = 0;
+            }
+            None => {}
+        }
+    }
+
+    fn submit(&mut self) -> String {
+        let result = self.buffer.clone();
+        if !result.trim().is_empty() {
+            self.history.push(result.clone());
+        }
+        self.buffer.clear();
+        self.cursor_pos = 0;
+        self.history_index = None;
+        result
+    }
+
+    fn clear(&mut self) {
+        self.buffer.clear();
+        self.cursor_pos = 0;
+        self.history_index = None;
+    }
+
+    /// 应用补全建议
+    fn apply_suggestion(&mut self, suggestion: &Suggestion) {
+        // span 使用的是字节索引，需要转换为字符索引
+        let before = &self.buffer[..suggestion.span.start];
+        let after = &self.buffer[suggestion.span.end..];
+        let before_char_count = before.chars().count();
+        let value_char_count = suggestion.value.chars().count();
+        self.buffer = format!("{}{}{}", before, suggestion.value, after);
+        self.cursor_pos = before_char_count + value_char_count;
+    }
+}
+
+/// 补全菜单
+struct CompletionMenu {
+    suggestions: Vec<Suggestion>,
+    selected_index: usize,
+    visible: bool,
+}
+
+impl CompletionMenu {
+    const MAX_VISIBLE: usize = 8;
+
+    fn new() -> Self {
+        Self {
+            suggestions: Vec::new(),
+            selected_index: 0,
+            visible: false,
+        }
+    }
+
+    fn update(&mut self, suggestions: Vec<Suggestion>) {
+        self.suggestions = suggestions;
+        self.selected_index = 0;
+        self.visible = !self.suggestions.is_empty();
+    }
+
+    fn select_next(&mut self) {
+        if !self.suggestions.is_empty() {
+            self.selected_index = (self.selected_index + 1) % self.suggestions.len();
+        }
+    }
+
+    fn select_previous(&mut self) {
+        if !self.suggestions.is_empty() {
+            self.selected_index = if self.selected_index == 0 {
+                self.suggestions.len() - 1
+            } else {
+                self.selected_index - 1
+            };
+        }
+    }
+
+    fn get_selected(&self) -> Option<&Suggestion> {
+        if self.visible && !self.suggestions.is_empty() {
+            Some(&self.suggestions[self.selected_index])
+        } else {
+            None
+        }
+    }
+
+    fn hide(&mut self) {
+        self.visible = false;
+        self.suggestions.clear();
+        self.selected_index = 0;
+    }
+
+    fn render(&self, prompt_len: u16) -> anyhow::Result<()> {
+        if !self.visible || self.suggestions.is_empty() {
+            return Ok(());
+        }
+
+        let mut stdout = stdout();
+
+        // 计算显示范围
+        let total = self.suggestions.len();
+        let visible_count = total.min(Self::MAX_VISIBLE);
+        let scroll_offset = if self.selected_index >= visible_count {
+            self.selected_index - visible_count + 1
+        } else {
+            0
+        };
+
+        // 保存光标位置
+        queue!(stdout, cursor::SavePosition)?;
+
+        // 渲染每个建议项
+        for i in 0..visible_count {
+            let idx = scroll_offset + i;
+            if idx >= total {
+                break;
+            }
+
+            let suggestion = &self.suggestions[idx];
+            let is_selected = idx == self.selected_index;
+
+            // 移动到下一行
+            queue!(stdout, Print("\r\n"), MoveToColumn(prompt_len))?;
+
+            if is_selected {
+                // 选中项：青色背景
+                queue!(
+                    stdout,
+                    SetBackgroundColor(CtColor::Cyan),
+                    SetForegroundColor(CtColor::Black),
+                )?;
+            } else {
+                queue!(stdout, SetForegroundColor(CtColor::White))?;
+            }
+
+            // 打印建议值
+            let display_value = if suggestion.value.len() > 30 {
+                format!("{}...", &suggestion.value[..27])
+            } else {
+                suggestion.value.clone()
+            };
+            queue!(stdout, Print(&display_value))?;
+
+            // 打印描述
+            if let Some(ref desc) = suggestion.description {
+                queue!(stdout, ResetColor, SetForegroundColor(CtColor::DarkGrey))?;
+                let desc_display = if desc.len() > 30 {
+                    format!(" - {}...", &desc[..27])
+                } else {
+                    format!(" - {}", desc)
+                };
+                queue!(stdout, Print(&desc_display))?;
+            }
+
+            queue!(stdout, ResetColor, Clear(ClearType::UntilNewLine))?;
+        }
+
+        // 恢复光标位置
+        queue!(stdout, cursor::RestorePosition)?;
+        stdout.flush()?;
+
+        Ok(())
+    }
+
+    fn clear_display(&self, prompt_len: u16) -> anyhow::Result<()> {
+        if self.suggestions.is_empty() {
+            return Ok(());
+        }
+
+        let mut stdout = stdout();
+        let visible_count = self.suggestions.len().min(Self::MAX_VISIBLE);
+
+        queue!(stdout, cursor::SavePosition)?;
+
+        for _ in 0..visible_count {
+            queue!(
+                stdout,
+                Print("\r\n"),
+                MoveToColumn(prompt_len),
+                Clear(ClearType::UntilNewLine)
+            )?;
+        }
+
+        queue!(stdout, cursor::RestorePosition)?;
+        stdout.flush()?;
+
+        Ok(())
+    }
+}
 
 // 命令信息结构
 #[derive(Clone, Debug)]
@@ -179,10 +505,7 @@ impl OxideCompleter {
             .map(|(value, description)| Suggestion {
                 value: value.clone(),
                 description: Some(description.clone()),
-                style: None,
-                extra: None,
                 span,
-                append_whitespace: false,
             })
             .collect();
         suggestions.sort_by(|a, b| a.value.cmp(&b.value));
@@ -418,8 +741,8 @@ fn format_file_size(bytes: u64) -> String {
     }
 }
 
-impl Completer for OxideCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+impl OxideCompleter {
+    fn complete(&self, line: &str, pos: usize) -> Vec<Suggestion> {
         let start = token_start(line, pos);
         let token = &line[start..pos];
         let end = token_end(line, pos);
@@ -463,30 +786,13 @@ impl OxidePrompt {
     fn new(label: PromptLabel) -> Self {
         Self { label }
     }
-}
 
-impl Prompt for OxidePrompt {
-    fn render_prompt_left(&self) -> Cow<'_, str> {
-        Cow::Owned(format!("{}> ", self.label.as_str()))
+    fn render(&self) -> String {
+        format!("{}> ", self.label.as_str())
     }
 
-    fn render_prompt_right(&self) -> Cow<'_, str> {
-        Cow::Borrowed("")
-    }
-
-    fn render_prompt_indicator(&self, _prompt_mode: PromptEditMode) -> Cow<'_, str> {
-        Cow::Borrowed("")
-    }
-
-    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        Cow::Borrowed("")
-    }
-
-    fn render_prompt_history_search_indicator(
-        &self,
-        _history_search: reedline::PromptHistorySearch,
-    ) -> Cow<'_, str> {
-        Cow::Borrowed("")
+    fn len(&self) -> u16 {
+        (self.label.as_str().len() + 2) as u16
     }
 }
 
@@ -564,6 +870,7 @@ use crate::agent::AgentType;
 use crate::agent::SubagentManager;
 use crate::agent::workflow::ComplexityEvaluator;
 use crate::cli::render::Spinner;
+use crate::cli::statusbar::StatusBar;
 use crate::config::secret::Secret;
 
 pub struct OxideCli {
@@ -579,6 +886,8 @@ pub struct OxideCli {
     subagent_manager: Arc<SubagentManager>,
     /// 复杂度评估器
     complexity_evaluator: ComplexityEvaluator,
+    /// 状态栏
+    statusbar: Option<StatusBar>,
 }
 
 // 手动实现 Debug，防止 api_key 泄露
@@ -601,6 +910,14 @@ impl OxideCli {
         context_manager: ContextManager,
         hitl: Arc<HitlIntegration>,
     ) -> Self {
+        let total_tokens = Arc::new(AtomicU64::new(0));
+        let session_id = context_manager.session_id().to_string();
+        let statusbar = StatusBar::new(
+            total_tokens.clone(),
+            session_id,
+            model_name.clone(),
+        );
+
         Self {
             api_key,
             model_name,
@@ -609,18 +926,39 @@ impl OxideCli {
             _hitl: hitl,
             prompt_label: PromptLabel::Oxide,
             spinner: Spinner::new(),
-            total_tokens: Arc::new(AtomicU64::new(0)),
+            total_tokens,
             subagent_manager: Arc::new(SubagentManager::new()),
             complexity_evaluator: ComplexityEvaluator::new(),
+            statusbar: Some(statusbar),
         }
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        // 确保终端处于正常模式并重置
+        let _ = terminal::disable_raw_mode();
+        // 重置终端属性
+        print!("\x1b[0m");
+        let _ = stdout().flush();
+
         println!("{}", LOGO);
         self.show_welcome()?;
         self.show_tips()?;
 
+        // 初始化状态栏（在欢迎信息之后）
+        if let Some(ref mut statusbar) = self.statusbar {
+            statusbar.init()?;
+            statusbar.start_refresh();
+        }
+
         let result = self.run_input_loop().await;
+
+        // 清理状态栏
+        if let Some(ref mut statusbar) = self.statusbar {
+            statusbar.cleanup()?;
+        }
+
+        // 确保退出时终端恢复正常
+        let _ = terminal::disable_raw_mode();
 
         match result {
             Ok(_) => println!("\n{}", "👋 Goodbye!".bright_cyan()),
@@ -723,100 +1061,82 @@ impl OxideCli {
     }
 
     async fn run_input_loop(&mut self) -> Result<()> {
-        let mut keybindings = default_emacs_keybindings();
-        keybindings.add_binding(
-            KeyModifiers::NONE,
-            KeyCode::Char('/'),
-            ReedlineEvent::Multiple(vec![
-                ReedlineEvent::Edit(vec![EditCommand::InsertChar('/')]),
-                ReedlineEvent::Menu("oxide_completion".to_string()),
-            ]),
-        );
-        keybindings.add_binding(
-            KeyModifiers::NONE,
-            KeyCode::Char('@'),
-            ReedlineEvent::Multiple(vec![
-                ReedlineEvent::Edit(vec![EditCommand::InsertChar('@')]),
-                ReedlineEvent::Menu("oxide_completion".to_string()),
-            ]),
-        );
-        keybindings.add_binding(
-            KeyModifiers::NONE,
-            KeyCode::Char('#'),
-            ReedlineEvent::Multiple(vec![
-                ReedlineEvent::Edit(vec![EditCommand::InsertChar('#')]),
-                ReedlineEvent::Menu("oxide_completion".to_string()),
-            ]),
-        );
-        keybindings.add_binding(
-            KeyModifiers::NONE,
-            KeyCode::BackTab,
-            ReedlineEvent::ExecuteHostCommand(PROMPT_CYCLE_COMMAND.to_string()),
-        );
-        keybindings.add_binding(
-            KeyModifiers::SHIFT,
-            KeyCode::Tab,
-            ReedlineEvent::ExecuteHostCommand(PROMPT_CYCLE_COMMAND.to_string()),
-        );
-        keybindings.add_binding(
-            KeyModifiers::NONE,
-            KeyCode::Tab,
-            ReedlineEvent::ExecuteHostCommand(PROMPT_CYCLE_COMMAND.to_string()),
-        );
+        // 检查是否是 TTY 终端
+        if !std::io::stdin().is_terminal() {
+            return Err(anyhow::anyhow!("Oxide CLI 需要在交互式终端中运行"));
+        }
 
-        let edit_mode = Box::new(Emacs::new(keybindings));
-        let completion_menu = IdeMenu::default()
-            .with_name("oxide_completion")
-            .with_description_mode(DescriptionMode::PreferRight)
-            .with_max_completion_height(8)
-            .with_max_description_height(6)
-            .with_max_description_width(48)
-            .with_correct_cursor_pos(true)
-            .with_selected_text_style(Style::new().on(Color::Cyan).fg(Color::Black).bold()) // 选中项：青色背景+黑字 (实心高亮)
-            .with_text_style(Style::new().fg(Color::Fixed(252)))                             // 未选中项：接近纯白
-            .with_description_text_style(Style::new().fg(Color::Fixed(248)).italic())       // 描述：更浅的灰色+斜体
-            .with_match_text_style(Style::new().fg(Color::Green).underline())               // 匹配字：绿色下划线
-            .with_selected_match_text_style(Style::new().on(Color::Cyan).fg(Color::Black).underline().bold()); // 选中匹配：青底黑字+下划线
-
-        let mut rl = Reedline::create()
-            .with_edit_mode(edit_mode)
-            .with_completer(Box::new(OxideCompleter))
-            .with_menu(ReedlineMenu::EngineCompleter(Box::new(completion_menu)));
-
+        let mut editor = LineEditor::new();
+        let completer = OxideCompleter;
+        let mut menu = CompletionMenu::new();
         let mut last_ctrl_c: Option<Instant> = None;
-
         let mut skip_separator = false;
 
         loop {
-            // 每次循环重新创建 prompt 以获取最新的显示信息
             let prompt = OxidePrompt::new(self.prompt_label);
+            let prompt_len = prompt.len();
 
             if skip_separator {
                 skip_separator = false;
             } else {
                 self.print_separator()?;
             }
-            let readline = rl.read_line(&prompt);
-            let final_input = match readline {
-                Ok(Signal::Success(line)) => {
+
+            // 启用 raw mode 进行输入
+            terminal::enable_raw_mode()?;
+
+            // 渲染提示符和当前输入
+            self.render_input(&editor, &prompt)?;
+
+            // 事件循环
+            let signal = loop {
+                if event::poll(Duration::from_millis(50))? {
+                    if let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()? {
+                        match self.handle_key(&mut editor, code, modifiers, &completer, &mut menu, prompt_len)? {
+                            Some(signal) => {
+                                // 清除补全菜单
+                                menu.clear_display(prompt_len)?;
+                                menu.hide();
+                                break signal;
+                            }
+                            None => {
+                                // 继续渲染
+                                self.render_input(&editor, &prompt)?;
+                                menu.render(prompt_len)?;
+                            }
+                        }
+                    }
+                }
+            };
+
+            // 退出 raw mode
+            terminal::disable_raw_mode()?;
+            println!(); // 换行
+
+            match signal {
+                Signal::Success(line) => {
                     if line == PROMPT_CYCLE_COMMAND {
                         let old_label = self.prompt_label;
                         self.prompt_label = self.prompt_label.next();
-
-                        // 显示模式切换提示
                         self.show_mode_switch_hint(old_label, self.prompt_label);
-
                         skip_separator = true;
                         continue;
                     }
+
                     let input = line.trim().to_string();
                     if input.is_empty() {
                         continue;
                     }
+
                     last_ctrl_c = None;
-                    input
+                    self.print_separator()?;
+
+                    let should_continue = self.handle_command(&input).await?;
+                    if !should_continue {
+                        break;
+                    }
                 }
-                Ok(Signal::CtrlC) => {
+                Signal::CtrlC => {
                     let now = Instant::now();
                     let should_exit = last_ctrl_c
                         .map(|prev| now.duration_since(prev) <= Duration::from_secs(1))
@@ -826,24 +1146,196 @@ impl OxideCli {
                         break;
                     }
                     last_ctrl_c = Some(now);
-                    continue;
+                    editor.clear();
                 }
-                Ok(Signal::CtrlD) => break,
-                Err(err) => {
-                    println!("{} {:?}", "Error:".red(), err);
+                Signal::CtrlD => {
                     break;
                 }
-            };
-
-            self.print_separator()?;
-
-            let should_continue = self.handle_command(&final_input).await?;
-            if !should_continue {
-                break;
             }
         }
 
         Ok(())
+    }
+
+    fn render_input(&self, editor: &LineEditor, prompt: &OxidePrompt) -> Result<()> {
+        let mut stdout = stdout();
+        let prompt_str = prompt.render();
+        let prompt_len = prompt.len();
+
+        // 计算光标前文本的显示宽度（中文字符占 2 个宽度）
+        let cursor_display_pos: u16 = editor.buffer
+            .chars()
+            .take(editor.cursor_pos)
+            .map(|c| if c.is_ascii() { 1 } else { 2 })
+            .sum();
+
+        queue!(
+            stdout,
+            MoveToColumn(0),
+            Clear(ClearType::CurrentLine),
+            SetForegroundColor(CtColor::Green),
+            Print(&prompt_str),
+            ResetColor,
+            Print(&editor.buffer),
+            MoveToColumn(prompt_len + cursor_display_pos)
+        )?;
+        stdout.flush()?;
+        Ok(())
+    }
+
+    fn handle_key(
+        &self,
+        editor: &mut LineEditor,
+        code: KeyCode,
+        modifiers: KeyModifiers,
+        completer: &OxideCompleter,
+        menu: &mut CompletionMenu,
+        prompt_len: u16,
+    ) -> Result<Option<Signal>> {
+        match (code, modifiers) {
+            // 退出
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                return Ok(Some(Signal::CtrlD));
+            }
+            (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                return Ok(Some(Signal::CtrlC));
+            }
+
+            // 提交输入
+            (KeyCode::Enter, _) => {
+                // 如果菜单可见且有选中项，应用补全
+                if menu.visible {
+                    if let Some(suggestion) = menu.get_selected() {
+                        editor.apply_suggestion(suggestion);
+                        menu.clear_display(prompt_len)?;
+                        menu.hide();
+                        return Ok(None);
+                    }
+                }
+                let input = editor.submit();
+                return Ok(Some(Signal::Success(input)));
+            }
+
+            // Tab 切换模式
+            (KeyCode::Tab, KeyModifiers::NONE)
+            | (KeyCode::Tab, KeyModifiers::SHIFT)
+            | (KeyCode::BackTab, _) => {
+                // 如果菜单可见，Tab 应用选中项
+                if menu.visible {
+                    if let Some(suggestion) = menu.get_selected() {
+                        editor.apply_suggestion(suggestion);
+                        menu.clear_display(prompt_len)?;
+                        menu.hide();
+                        return Ok(None);
+                    }
+                }
+                // 否则切换模式
+                editor.clear();
+                return Ok(Some(Signal::Success(PROMPT_CYCLE_COMMAND.to_string())));
+            }
+
+            // 菜单导航
+            (KeyCode::Down, _) if menu.visible => {
+                menu.select_next();
+            }
+            (KeyCode::Up, _) if menu.visible => {
+                menu.select_previous();
+            }
+
+            // Escape 关闭菜单
+            (KeyCode::Esc, _) => {
+                if menu.visible {
+                    menu.clear_display(prompt_len)?;
+                    menu.hide();
+                }
+            }
+
+            // 编辑操作
+            (KeyCode::Backspace, _) => {
+                editor.delete_char();
+                self.update_completions(editor, completer, menu);
+            }
+            (KeyCode::Delete, _) => {
+                editor.delete_char_forward();
+                self.update_completions(editor, completer, menu);
+            }
+            (KeyCode::Left, _) => {
+                if menu.visible {
+                    menu.clear_display(prompt_len)?;
+                    menu.hide();
+                }
+                editor.move_left();
+            }
+            (KeyCode::Right, _) => {
+                if menu.visible {
+                    menu.clear_display(prompt_len)?;
+                    menu.hide();
+                }
+                editor.move_right();
+            }
+            (KeyCode::Home, _) | (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
+                if menu.visible {
+                    menu.clear_display(prompt_len)?;
+                    menu.hide();
+                }
+                editor.move_home();
+            }
+            (KeyCode::End, _) | (KeyCode::Char('e'), KeyModifiers::CONTROL) => {
+                if menu.visible {
+                    menu.clear_display(prompt_len)?;
+                    menu.hide();
+                }
+                editor.move_end();
+            }
+            (KeyCode::Up, _) => {
+                editor.history_up();
+            }
+            (KeyCode::Down, _) => {
+                editor.history_down();
+            }
+
+            // 清除当前行
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                if menu.visible {
+                    menu.clear_display(prompt_len)?;
+                    menu.hide();
+                }
+                editor.clear();
+            }
+
+            // 普通字符输入
+            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                // 先清除旧菜单
+                if menu.visible {
+                    menu.clear_display(prompt_len)?;
+                }
+
+                editor.insert_char(c);
+
+                // 触发补全
+                if c == '/' || c == '@' || c == '#' {
+                    self.update_completions(editor, completer, menu);
+                } else if menu.visible {
+                    // 继续过滤补全
+                    self.update_completions(editor, completer, menu);
+                }
+            }
+
+            _ => {}
+        }
+
+        Ok(None)
+    }
+
+    fn update_completions(
+        &self,
+        editor: &LineEditor,
+        completer: &OxideCompleter,
+        menu: &mut CompletionMenu,
+    ) {
+        // complete 函数需要字节索引
+        let suggestions = completer.complete(&editor.buffer, editor.cursor_byte_pos());
+        menu.update(suggestions);
     }
 
     pub fn print_separator(&self) -> Result<()> {
