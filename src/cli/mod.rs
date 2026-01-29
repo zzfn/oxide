@@ -7,11 +7,11 @@ use anyhow::Result;
 use colored::*;
 use inquire::Select;
 use crossterm::{
-    cursor::{self, MoveToColumn},
+    cursor::{self, MoveTo, MoveToColumn},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     queue,
     style::{Color as CtColor, Print, ResetColor, SetForegroundColor, SetBackgroundColor},
-    terminal::{self, Clear, ClearType},
+    terminal::{self, Clear, ClearType, ScrollUp},
 };
 use std::collections::HashMap;
 use std::io::{stdout, Write, IsTerminal};
@@ -936,19 +936,37 @@ impl OxideCli {
     pub async fn run(&mut self) -> Result<()> {
         // 确保终端处于正常模式并重置
         let _ = terminal::disable_raw_mode();
-        // 重置终端属性
         print!("\x1b[0m");
         let _ = stdout().flush();
 
+        // 打印欢迎信息（在当前光标位置）
         println!("{}", LOGO);
         self.show_welcome()?;
         self.show_tips()?;
 
-        // 初始化状态栏（在欢迎信息之后）
+        // 获取终端尺寸
+        let (width, height) = terminal::size()?;
+        let mut stdout = stdout();
+
+        // 设置滚动区域（为输入框和状态栏预留空间）
+        // 布局：[0..height-3] 响应区 | [height-2] 输入框 | [height-1] 状态栏
+        let scroll_bottom = height.saturating_sub(2);
+        print!("\x1b[1;{}r", scroll_bottom);
+        stdout.flush()?;
+
+        // 初始化状态栏
         if let Some(ref mut statusbar) = self.statusbar {
             statusbar.init()?;
             statusbar.start_refresh();
         }
+
+        // 绘制输入框上方的分隔线
+        queue!(stdout, cursor::SavePosition)?;
+        queue!(stdout, MoveTo(0, height.saturating_sub(3)))?;
+        let separator = "─".repeat(width as usize);
+        queue!(stdout, Print(separator.dimmed().to_string()))?;
+        queue!(stdout, cursor::RestorePosition)?;
+        stdout.flush()?;
 
         let result = self.run_input_loop().await;
 
@@ -956,6 +974,10 @@ impl OxideCli {
         if let Some(ref mut statusbar) = self.statusbar {
             statusbar.cleanup()?;
         }
+
+        // 重置滚动区域
+        print!("\x1b[r");
+        stdout.flush()?;
 
         // 确保退出时终端恢复正常
         let _ = terminal::disable_raw_mode();
@@ -1079,7 +1101,7 @@ impl OxideCli {
             if skip_separator {
                 skip_separator = false;
             } else {
-                self.print_separator()?;
+                self.print_in_scroll_region("")?;
             }
 
             // 启用 raw mode 进行输入
@@ -1111,7 +1133,6 @@ impl OxideCli {
 
             // 退出 raw mode
             terminal::disable_raw_mode()?;
-            println!(); // 换行
 
             match signal {
                 Signal::Success(line) => {
@@ -1129,7 +1150,9 @@ impl OxideCli {
                     }
 
                     last_ctrl_c = None;
-                    self.print_separator()?;
+
+                    // 在滚动区域显示用户输入
+                    self.print_in_scroll_region(&format!("{} {}", ">".green(), input))?;
 
                     let should_continue = self.handle_command(&input).await?;
                     if !should_continue {
@@ -1141,7 +1164,7 @@ impl OxideCli {
                     let should_exit = last_ctrl_c
                         .map(|prev| now.duration_since(prev) <= Duration::from_secs(1))
                         .unwrap_or(false);
-                    println!("{}", "^C".dimmed());
+                    self.print_in_scroll_region(&"^C".dimmed().to_string())?;
                     if should_exit {
                         break;
                     }
@@ -1162,6 +1185,11 @@ impl OxideCli {
         let prompt_str = prompt.render();
         let prompt_len = prompt.len();
 
+        // 获取终端尺寸
+        let (_, height) = terminal::size()?;
+        // 输入框固定在 height-2 行（状态栏在 height-1）
+        let input_row = height.saturating_sub(2);
+
         // 计算光标前文本的显示宽度（中文字符占 2 个宽度）
         let cursor_display_pos: u16 = editor.buffer
             .chars()
@@ -1171,13 +1199,13 @@ impl OxideCli {
 
         queue!(
             stdout,
-            MoveToColumn(0),
+            MoveTo(0, input_row),
             Clear(ClearType::CurrentLine),
             SetForegroundColor(CtColor::Green),
             Print(&prompt_str),
             ResetColor,
             Print(&editor.buffer),
-            MoveToColumn(prompt_len + cursor_display_pos)
+            MoveTo(prompt_len + cursor_display_pos, input_row)
         )?;
         stdout.flush()?;
         Ok(())
@@ -1345,6 +1373,36 @@ impl OxideCli {
             .max(1);
         let separator = "-".repeat(width);
         println!("{}", separator.dimmed());
+        Ok(())
+    }
+
+    /// 在滚动区域内打印内容（不影响输入框和状态栏）
+    pub fn print_in_scroll_region(&self, text: &str) -> Result<()> {
+        let mut stdout = stdout();
+        let (_, height) = terminal::size()?;
+
+        // 滚动区域的最后一行（height-3，因为 height-2 是输入框，height-1 是状态栏）
+        let scroll_bottom = height.saturating_sub(3);
+
+        // 保存光标位置
+        queue!(stdout, cursor::SavePosition)?;
+
+        // 移动到滚动区域底部
+        queue!(stdout, MoveTo(0, scroll_bottom))?;
+
+        // 滚动一行并打印内容
+        queue!(stdout, ScrollUp(1))?;
+        queue!(stdout, MoveTo(0, scroll_bottom))?;
+        queue!(stdout, Clear(ClearType::CurrentLine))?;
+
+        if !text.is_empty() {
+            queue!(stdout, Print(text))?;
+        }
+
+        // 恢复光标位置
+        queue!(stdout, cursor::RestorePosition)?;
+        stdout.flush()?;
+
         Ok(())
     }
 

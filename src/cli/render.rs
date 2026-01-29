@@ -1,5 +1,10 @@
 use anyhow::Result;
 use colored::*;
+use crossterm::{
+    cursor::{self, MoveTo},
+    queue,
+    terminal::{self, ScrollUp, Clear, ClearType},
+};
 use futures::StreamExt;
 use rig::agent::{FinalResponse, MultiTurnStreamItem, StreamingResult};
 use rig::streaming::StreamedAssistantContent;
@@ -128,13 +133,34 @@ impl MarkdownStreamRenderer {
         self.buffer.push_str(text);
     }
 
+    /// 在滚动区域内打印一行
+    fn print_in_scroll_region(text: &str) {
+        let mut stdout = stdout();
+        if let Ok((_, height)) = terminal::size() {
+            let scroll_bottom = height.saturating_sub(3);
+
+            let _ = queue!(stdout, cursor::SavePosition);
+            let _ = queue!(stdout, MoveTo(0, scroll_bottom));
+            let _ = queue!(stdout, ScrollUp(1));
+            let _ = queue!(stdout, MoveTo(0, scroll_bottom));
+            let _ = queue!(stdout, Clear(ClearType::CurrentLine));
+            let _ = queue!(stdout, crossterm::style::Print(text));
+            let _ = queue!(stdout, cursor::RestorePosition);
+            let _ = stdout.flush();
+        } else {
+            // 回退到普通输出
+            print!("{}", text);
+            let _ = stdout.flush();
+        }
+    }
+
     /// 刷新当前行到输出
     fn flush_line(&mut self, skin: &MadSkin) {
         let line = self.line_buffer.clone();
 
-        if self.in_code_block {
+        let output = if self.in_code_block {
             // 代码块内直接输出
-            print!("{}", line);
+            line.clone()
         } else {
             // 渲染 Markdown 格式
             // 检测列表项
@@ -145,12 +171,14 @@ impl MarkdownStreamRenderer {
             }
 
             // 使用 termimad 渲染行
-            let rendered = skin.inline(&line);
-            print!("{}", rendered);
-        }
+            skin.inline(&line).to_string()
+        };
+
+        // 在滚动区域内输出（去掉末尾换行符，因为 ScrollUp 已经处理了）
+        let output_trimmed = output.trim_end_matches('\n');
+        Self::print_in_scroll_region(output_trimmed);
 
         self.line_buffer.clear();
-        stdout().flush().unwrap();
     }
 
     /// 完成流式输出，渲染完整格式
@@ -159,11 +187,11 @@ impl MarkdownStreamRenderer {
         if !self.line_buffer.is_empty() {
             let line = self.line_buffer;
             let rendered = skin.inline(&line);
-            print!("{}", rendered);
+            Self::print_in_scroll_region(&rendered.to_string());
         }
 
         // 输出额外的空行分隔
-        println!();
+        Self::print_in_scroll_region("");
     }
 }
 
@@ -180,7 +208,7 @@ where
     let (stop_spinner_tx, mut stop_spinner_rx) = oneshot::channel();
     let mut stop_spinner_tx = Some(stop_spinner_tx);
 
-    // 启动动画 spinner
+    // 启动动画 spinner（在滚动区域内）
     let mut spinner_handle = Some(tokio::spawn(async move {
         let mut frame = 0;
         let mut ticker = interval(Duration::from_millis(100));
@@ -189,16 +217,13 @@ where
         loop {
             tokio::select! {
                 _ = &mut stop_spinner_rx => {
-                    // 清除 spinner 行并显示静态图标
-                    print!("\r\x1b[2K"); // 清除整行
-                    print!("● oxide: ");
-                    stdout().flush().unwrap();
+                    // 停止 spinner，显示静态图标
+                    MarkdownStreamRenderer::print_in_scroll_region(&format!("● oxide: "));
                     break;
                 }
                 _ = ticker.tick() => {
                     let spinner = SPINNER_FRAMES[frame % SPINNER_FRAMES.len()];
-                    print!("\r{} {}", spinner.blue(), "oxide:".dimmed());
-                    stdout().flush().unwrap();
+                    MarkdownStreamRenderer::print_in_scroll_region(&format!("{} oxide:", spinner.blue()));
                     frame += 1;
                 }
             }
@@ -244,9 +269,8 @@ where
                     first_content = false;
                 }
                 let reasoning = r.reasoning.join("\n");
-                // Reasoning 内容直接输出（通常不含 markdown）
-                print!("{}", reasoning.dimmed());
-                stdout().flush().unwrap();
+                // Reasoning 内容在滚动区域输出
+                MarkdownStreamRenderer::print_in_scroll_region(&reasoning.dimmed().to_string());
             }
             Ok(MultiTurnStreamItem::FinalResponse(res)) => {
                 final_res = res;
