@@ -948,9 +948,9 @@ impl OxideCli {
         let (width, height) = terminal::size()?;
         let mut stdout = stdout();
 
-        // 设置滚动区域（为输入框和状态栏预留空间）
-        // 布局：[0..height-3] 响应区 | [height-2] 输入框 | [height-1] 状态栏
-        let scroll_bottom = height.saturating_sub(2);
+        // 设置滚动区域（为输入框边框和状态栏预留空间）
+        // 布局：[0..height-6] 响应区 | [height-5] 上边框 | [height-4] 输入框 | [height-3] 下边框 | [height-2] 间距 | [height-1] 状态栏
+        let scroll_bottom = height.saturating_sub(5);
         print!("\x1b[1;{}r", scroll_bottom);
         stdout.flush()?;
 
@@ -960,13 +960,8 @@ impl OxideCli {
             statusbar.start_refresh();
         }
 
-        // 绘制输入框上方的分隔线
-        queue!(stdout, cursor::SavePosition)?;
-        queue!(stdout, MoveTo(0, height.saturating_sub(3)))?;
-        let separator = "─".repeat(width as usize);
-        queue!(stdout, Print(separator.dimmed().to_string()))?;
-        queue!(stdout, cursor::RestorePosition)?;
-        stdout.flush()?;
+        // 绘制输入框边框
+        self.render_input_box_frame(width, height)?;
 
         let result = self.run_input_loop().await;
 
@@ -1154,7 +1149,15 @@ impl OxideCli {
                     // 在滚动区域显示用户输入
                     self.print_in_scroll_region(&format!("{} {}", ">".green(), input))?;
 
+                    // 将光标移动到滚动区域底部，以便 handle_command 中的 println! 在正确位置输出
+                    self.move_cursor_to_scroll_region()?;
+
                     let should_continue = self.handle_command(&input).await?;
+
+                    // 重新绘制输入框边框（可能被输出覆盖）
+                    let (width, height) = terminal::size()?;
+                    self.render_input_box_frame(width, height)?;
+
                     if !should_continue {
                         break;
                     }
@@ -1180,15 +1183,61 @@ impl OxideCli {
         Ok(())
     }
 
+    /// 渲染输入框边框
+    fn render_input_box_frame(&self, width: u16, height: u16) -> Result<()> {
+        let mut stdout = stdout();
+
+        // 边框字符
+        let top_left = "╭";
+        let top_right = "╮";
+        let bottom_left = "╰";
+        let bottom_right = "╯";
+        let horizontal = "─";
+
+        // 上边框行 (height-5)
+        let top_row = height.saturating_sub(5);
+        // 输入内容行 (height-4)
+        let _input_row = height.saturating_sub(4);
+        // 下边框行 (height-3)
+        let bottom_row = height.saturating_sub(3);
+
+        // 边框内部宽度
+        let inner_width = width.saturating_sub(2) as usize;
+
+        queue!(stdout, cursor::SavePosition)?;
+
+        // 绘制上边框
+        queue!(stdout, MoveTo(0, top_row))?;
+        queue!(stdout, SetForegroundColor(CtColor::DarkGrey))?;
+        queue!(stdout, Print(top_left))?;
+        queue!(stdout, Print(horizontal.repeat(inner_width)))?;
+        queue!(stdout, Print(top_right))?;
+
+        // 绘制下边框
+        queue!(stdout, MoveTo(0, bottom_row))?;
+        queue!(stdout, Print(bottom_left))?;
+        queue!(stdout, Print(horizontal.repeat(inner_width)))?;
+        queue!(stdout, Print(bottom_right))?;
+
+        queue!(stdout, ResetColor)?;
+        queue!(stdout, cursor::RestorePosition)?;
+        stdout.flush()?;
+
+        Ok(())
+    }
+
     fn render_input(&self, editor: &LineEditor, prompt: &OxidePrompt) -> Result<()> {
         let mut stdout = stdout();
         let prompt_str = prompt.render();
         let prompt_len = prompt.len();
 
         // 获取终端尺寸
-        let (_, height) = terminal::size()?;
-        // 输入框固定在 height-2 行（状态栏在 height-1）
-        let input_row = height.saturating_sub(2);
+        let (width, height) = terminal::size()?;
+        // 输入框内容固定在 height-4 行（边框在 height-5 和 height-3，状态栏在 height-1）
+        let input_row = height.saturating_sub(4);
+
+        // 边框字符
+        let vertical = "│";
 
         // 计算光标前文本的显示宽度（中文字符占 2 个宽度）
         let cursor_display_pos: u16 = editor.buffer
@@ -1197,16 +1246,29 @@ impl OxideCli {
             .map(|c| if c.is_ascii() { 1 } else { 2 })
             .sum();
 
-        queue!(
-            stdout,
-            MoveTo(0, input_row),
-            Clear(ClearType::CurrentLine),
-            SetForegroundColor(CtColor::Green),
-            Print(&prompt_str),
-            ResetColor,
-            Print(&editor.buffer),
-            MoveTo(prompt_len + cursor_display_pos, input_row)
-        )?;
+        // 清除输入行并绘制左边框
+        queue!(stdout, MoveTo(0, input_row))?;
+        queue!(stdout, Clear(ClearType::CurrentLine))?;
+        queue!(stdout, SetForegroundColor(CtColor::DarkGrey))?;
+        queue!(stdout, Print(vertical))?;
+        queue!(stdout, ResetColor)?;
+
+        // 绘制提示符和输入内容
+        queue!(stdout, SetForegroundColor(CtColor::Green))?;
+        queue!(stdout, Print(&prompt_str))?;
+        queue!(stdout, ResetColor)?;
+        queue!(stdout, Print(&editor.buffer))?;
+
+        // 填充剩余空间并绘制右边框
+        let content_width = 1 + prompt_len as usize + editor.buffer.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum::<usize>();
+        let padding = (width as usize).saturating_sub(content_width + 1);
+        queue!(stdout, Print(" ".repeat(padding)))?;
+        queue!(stdout, SetForegroundColor(CtColor::DarkGrey))?;
+        queue!(stdout, Print(vertical))?;
+        queue!(stdout, ResetColor)?;
+
+        // 移动光标到正确位置（左边框占1列）
+        queue!(stdout, MoveTo(1 + prompt_len + cursor_display_pos, input_row))?;
         stdout.flush()?;
         Ok(())
     }
@@ -1381,8 +1443,8 @@ impl OxideCli {
         let mut stdout = stdout();
         let (_, height) = terminal::size()?;
 
-        // 滚动区域的最后一行（height-3，因为 height-2 是输入框，height-1 是状态栏）
-        let scroll_bottom = height.saturating_sub(3);
+        // 滚动区域的最后一行（height-6，因为 height-5 是上边框，height-4 是输入框，height-3 是下边框，height-2 是间距，height-1 是状态栏）
+        let scroll_bottom = height.saturating_sub(6);
 
         // 保存光标位置
         queue!(stdout, cursor::SavePosition)?;
@@ -1401,6 +1463,21 @@ impl OxideCli {
 
         // 恢复光标位置
         queue!(stdout, cursor::RestorePosition)?;
+        stdout.flush()?;
+
+        Ok(())
+    }
+
+    /// 将光标移动到滚动区域底部（用于 println! 输出）
+    fn move_cursor_to_scroll_region(&self) -> Result<()> {
+        let mut stdout = stdout();
+        let (_, height) = terminal::size()?;
+
+        // 滚动区域的最后一行
+        let scroll_bottom = height.saturating_sub(6);
+
+        // 移动光标到滚动区域底部
+        queue!(stdout, MoveTo(0, scroll_bottom))?;
         stdout.flush()?;
 
         Ok(())
