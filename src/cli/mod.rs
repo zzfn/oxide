@@ -888,6 +888,8 @@ pub struct OxideCli {
     complexity_evaluator: ComplexityEvaluator,
     /// 状态栏
     statusbar: Option<StatusBar>,
+    /// 流式输出期间用户输入的内容（待处理）
+    pending_input: Option<String>,
 }
 
 // 手动实现 Debug，防止 api_key 泄露
@@ -930,6 +932,7 @@ impl OxideCli {
             subagent_manager: Arc::new(SubagentManager::new()),
             complexity_evaluator: ComplexityEvaluator::new(),
             statusbar: Some(statusbar),
+            pending_input: None,
         }
     }
 
@@ -1092,6 +1095,14 @@ impl OxideCli {
         loop {
             let prompt = OxidePrompt::new(self.prompt_label);
             let prompt_len = prompt.len();
+
+            // 检查是否有流式输出期间用户输入的内容
+            if let Some(pending) = self.pending_input.take() {
+                if !pending.is_empty() {
+                    editor.buffer = pending;
+                    editor.cursor_pos = editor.char_count();
+                }
+            }
 
             if skip_separator {
                 skip_separator = false;

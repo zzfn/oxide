@@ -2,6 +2,7 @@ use anyhow::Result;
 use colored::*;
 use crossterm::{
     cursor::{self, MoveTo},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     queue,
     terminal::{self, ScrollUp, Clear, ClearType},
 };
@@ -132,15 +133,32 @@ impl MarkdownStreamRenderer {
     /// 布局：[0..height-6] 响应区 | [height-5] 上边框 | [height-4] 输入框 | [height-3] 下边框 | [height-2] 间距 | [height-1] 状态栏
     fn print_in_scroll_region(text: &str) {
         let mut stdout = stdout();
-        if let Ok((_, height)) = terminal::size() {
-            let scroll_bottom = height.saturating_sub(6);
+        if let Ok((width, height)) = terminal::size() {
+            // 滚动区域底部（与 mod.rs 中的设置一致：height - 5）
+            let scroll_bottom = height.saturating_sub(5);
 
+            // 保存光标位置
             let _ = queue!(stdout, cursor::SavePosition);
-            let _ = queue!(stdout, MoveTo(0, scroll_bottom));
+
+            // 设置滚动区域（确保 ScrollUp 只影响这个区域）
+            let _ = write!(stdout, "\x1b[1;{}r", scroll_bottom);
+
+            // 移动到滚动区域底部
+            let _ = queue!(stdout, MoveTo(0, scroll_bottom.saturating_sub(1)));
+
+            // 滚动一行
             let _ = queue!(stdout, ScrollUp(1));
-            let _ = queue!(stdout, MoveTo(0, scroll_bottom));
+
+            // 移动到滚动区域底部并清除该行
+            let _ = queue!(stdout, MoveTo(0, scroll_bottom.saturating_sub(1)));
             let _ = queue!(stdout, Clear(ClearType::CurrentLine));
-            let _ = queue!(stdout, crossterm::style::Print(text));
+
+            // 打印文本（截断过长的文本）
+            let text_display: String = text.chars().take(width as usize).collect();
+            let _ = queue!(stdout, crossterm::style::Print(&text_display));
+
+            // 保持滚动区域设置（不要恢复为整个终端）
+            // 恢复光标位置
             let _ = queue!(stdout, cursor::RestorePosition);
             let _ = stdout.flush();
         } else {
@@ -236,18 +254,72 @@ impl MarkdownStreamRenderer {
     }
 }
 
+/// 流式输出结果，包含响应和用户在输出期间输入的内容
+pub struct StreamResult {
+    pub response: FinalResponse,
+    /// 用户在流式输出期间输入的内容
+    pub pending_input: String,
+}
+
+/// 在输入框中渲染用户输入（流式输出期间）
+fn render_pending_input(input: &str, cursor_pos: usize) {
+    let mut stdout = stdout();
+    if let Ok((width, height)) = terminal::size() {
+        let input_row = height.saturating_sub(4);
+        let prompt = "● ".blue().to_string();
+        let prompt_display_len = 2; // "● " 的显示宽度
+
+        // 直接移动到输入行，不使用 SavePosition（避免栈不平衡）
+        let _ = queue!(stdout, MoveTo(0, input_row));
+        let _ = queue!(stdout, Clear(ClearType::CurrentLine));
+
+        // 绘制左边框
+        let _ = queue!(stdout, crossterm::style::SetForegroundColor(crossterm::style::Color::DarkGrey));
+        let _ = queue!(stdout, crossterm::style::Print("│"));
+        let _ = queue!(stdout, crossterm::style::ResetColor);
+
+        // 绘制提示符和输入内容
+        let _ = queue!(stdout, crossterm::style::Print(&prompt));
+        let _ = queue!(stdout, crossterm::style::Print(input));
+
+        // 填充剩余空间
+        let content_len = prompt_display_len + input.chars().count();
+        let remaining = (width as usize).saturating_sub(content_len + 2); // 2 for borders
+        let _ = queue!(stdout, crossterm::style::Print(" ".repeat(remaining)));
+
+        // 绘制右边框
+        let _ = queue!(stdout, crossterm::style::SetForegroundColor(crossterm::style::Color::DarkGrey));
+        let _ = queue!(stdout, crossterm::style::Print("│"));
+        let _ = queue!(stdout, crossterm::style::ResetColor);
+
+        // 将光标移动到输入位置
+        let cursor_col = 1 + prompt_display_len + cursor_pos;
+        let _ = queue!(stdout, MoveTo(cursor_col as u16, input_row));
+
+        let _ = stdout.flush();
+    }
+}
+
 /// 自定义流式输出函数，替代 rig 的 stream_to_stdout
 /// 去掉 "Response:" 前缀，并在 "● oxide:" 后添加动画效果
 /// 支持实时 Markdown 渲染
+/// 同时监听用户输入，允许用户在流式输出期间输入下一条消息
 pub async fn stream_with_animation<R>(
     stream: &mut StreamingResult<R>,
-) -> Result<FinalResponse, std::io::Error>
+) -> Result<StreamResult, std::io::Error>
 where
     R: Send + 'static,
 {
     let mut final_res = FinalResponse::empty();
     let (stop_spinner_tx, mut stop_spinner_rx) = oneshot::channel();
     let mut stop_spinner_tx = Some(stop_spinner_tx);
+
+    // 用户输入缓存
+    let mut pending_input = String::new();
+    let mut cursor_pos: usize = 0;
+
+    // 启用 raw mode 以监听键盘输入
+    let _ = terminal::enable_raw_mode();
 
     // 启动动画 spinner（在输入框上方固定位置，带计时）
     let mut spinner_handle = Some(tokio::spawn(async move {
@@ -278,63 +350,155 @@ where
     let mut renderer = MarkdownStreamRenderer::new();
     let skin = get_mad_skin();
 
-    while let Some(content) = stream.next().await {
-        match content {
-            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(
-                text,
-            ))) => {
-                if first_content {
-                    // 收到第一个文本块，停止 spinner
-                    if let Some(tx) = stop_spinner_tx.take() {
-                        let _ = tx.send(());
-                    }
-                    // 等待 spinner 清理完成
-                    if let Some(handle) = spinner_handle.take() {
-                        let _ = handle.await;
-                    }
-                    first_content = false;
-                }
+    // 初始渲染输入框
+    render_pending_input(&pending_input, cursor_pos);
 
-                // 使用 Markdown 渲染器处理文本
-                renderer.process_text(&text.text, skin);
-            }
-            Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Reasoning(r),
-            )) => {
-                if first_content {
-                    // 收到第一个内容块，停止 spinner
-                    if let Some(tx) = stop_spinner_tx.take() {
-                        let _ = tx.send(());
+    // 键盘事件检查定时器
+    let mut keyboard_ticker = interval(Duration::from_millis(16)); // ~60fps
+
+    loop {
+        tokio::select! {
+            biased;
+
+            // 优先处理流内容
+            content = stream.next() => {
+                match content {
+                    Some(Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text)))) => {
+                        if first_content {
+                            // 收到第一个文本块，停止 spinner
+                            if let Some(tx) = stop_spinner_tx.take() {
+                                let _ = tx.send(());
+                            }
+                            // 等待 spinner 清理完成
+                            if let Some(handle) = spinner_handle.take() {
+                                let _ = handle.await;
+                            }
+                            first_content = false;
+                        }
+
+                        // 使用 Markdown 渲染器处理文本
+                        renderer.process_text(&text.text, skin);
+
+                        // 重新渲染输入框（保持用户输入可见）
+                        render_pending_input(&pending_input, cursor_pos);
                     }
-                    if let Some(handle) = spinner_handle.take() {
-                        let _ = handle.await;
+                    Some(Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(r)))) => {
+                        if first_content {
+                            if let Some(tx) = stop_spinner_tx.take() {
+                                let _ = tx.send(());
+                            }
+                            if let Some(handle) = spinner_handle.take() {
+                                let _ = handle.await;
+                            }
+                            first_content = false;
+                        }
+                        let reasoning = r.reasoning.join("\n");
+                        MarkdownStreamRenderer::print_in_scroll_region(&reasoning.dimmed().to_string());
+                        render_pending_input(&pending_input, cursor_pos);
                     }
-                    first_content = false;
+                    Some(Ok(MultiTurnStreamItem::FinalResponse(res))) => {
+                        final_res = res;
+                    }
+                    Some(Err(err)) => {
+                        let err_msg = err.to_string();
+                        if err_msg.contains("PromptCancelled") {
+                            if let Some(tx) = stop_spinner_tx.take() {
+                                let _ = tx.send(());
+                            }
+                            if let Some(handle) = spinner_handle.take() {
+                                let _ = handle.await;
+                            }
+                            let _ = terminal::disable_raw_mode();
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Interrupted,
+                                "prompt_cancelled",
+                            ));
+                        }
+                        eprintln!("Error: {}", err);
+                    }
+                    Some(_) => {}
+                    None => {
+                        // 流结束
+                        break;
+                    }
                 }
-                let reasoning = r.reasoning.join("\n");
-                // Reasoning 内容在滚动区域输出
-                MarkdownStreamRenderer::print_in_scroll_region(&reasoning.dimmed().to_string());
             }
-            Ok(MultiTurnStreamItem::FinalResponse(res)) => {
-                final_res = res;
-            }
-            Err(err) => {
-                let err_msg = err.to_string();
-                if err_msg.contains("PromptCancelled") {
-                    if let Some(tx) = stop_spinner_tx.take() {
-                        let _ = tx.send(());
+
+            // 定期检查键盘输入
+            _ = keyboard_ticker.tick() => {
+                // 非阻塞检查键盘事件
+                while event::poll(Duration::from_millis(0)).unwrap_or(false) {
+                    if let Ok(Event::Key(KeyEvent { code, modifiers, .. })) = event::read() {
+                        match (code, modifiers) {
+                            // Ctrl+C - 不处理，让流继续
+                            (KeyCode::Char('c'), KeyModifiers::CONTROL) => {}
+                            // 普通字符输入
+                            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                                let byte_pos = pending_input
+                                    .char_indices()
+                                    .nth(cursor_pos)
+                                    .map(|(i, _)| i)
+                                    .unwrap_or(pending_input.len());
+                                pending_input.insert(byte_pos, c);
+                                cursor_pos += 1;
+                                render_pending_input(&pending_input, cursor_pos);
+                            }
+                            // 退格键
+                            (KeyCode::Backspace, _) => {
+                                if cursor_pos > 0 {
+                                    cursor_pos -= 1;
+                                    let byte_pos = pending_input
+                                        .char_indices()
+                                        .nth(cursor_pos)
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(pending_input.len());
+                                    pending_input.remove(byte_pos);
+                                    render_pending_input(&pending_input, cursor_pos);
+                                }
+                            }
+                            // 删除键
+                            (KeyCode::Delete, _) => {
+                                let char_count = pending_input.chars().count();
+                                if cursor_pos < char_count {
+                                    let byte_pos = pending_input
+                                        .char_indices()
+                                        .nth(cursor_pos)
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(pending_input.len());
+                                    pending_input.remove(byte_pos);
+                                    render_pending_input(&pending_input, cursor_pos);
+                                }
+                            }
+                            // 左箭头
+                            (KeyCode::Left, _) => {
+                                if cursor_pos > 0 {
+                                    cursor_pos -= 1;
+                                    render_pending_input(&pending_input, cursor_pos);
+                                }
+                            }
+                            // 右箭头
+                            (KeyCode::Right, _) => {
+                                let char_count = pending_input.chars().count();
+                                if cursor_pos < char_count {
+                                    cursor_pos += 1;
+                                    render_pending_input(&pending_input, cursor_pos);
+                                }
+                            }
+                            // Home
+                            (KeyCode::Home, _) => {
+                                cursor_pos = 0;
+                                render_pending_input(&pending_input, cursor_pos);
+                            }
+                            // End
+                            (KeyCode::End, _) => {
+                                cursor_pos = pending_input.chars().count();
+                                render_pending_input(&pending_input, cursor_pos);
+                            }
+                            _ => {}
+                        }
                     }
-                    if let Some(handle) = spinner_handle.take() {
-                        let _ = handle.await;
-                    }
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Interrupted,
-                        "prompt_cancelled",
-                    ));
                 }
-                eprintln!("Error: {}", err);
             }
-            _ => {}
         }
     }
 
@@ -351,7 +515,13 @@ where
         }
     }
 
-    Ok(final_res)
+    // 退出 raw mode
+    let _ = terminal::disable_raw_mode();
+
+    Ok(StreamResult {
+        response: final_res,
+        pending_input,
+    })
 }
 
 impl OxideCli {

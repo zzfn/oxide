@@ -12,7 +12,7 @@ use rig::streaming::StreamingPrompt;
 use std::io::{stdout, Write};
 use std::sync::Arc;
 
-use super::render::stream_with_animation;
+use super::render::{stream_with_animation, StreamResult};
 use super::OxideCli;
 
 impl OxideCli {
@@ -334,7 +334,7 @@ impl OxideCli {
 
         let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
 
-        let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
+        let response_result: Result<StreamResult, std::io::Error> = match &self.agent {
             AgentType::OpenAI(agent) => {
                 let mut stream = agent
                     .stream_prompt(input)
@@ -358,8 +358,13 @@ impl OxideCli {
         };
 
         match response_result {
-            Ok(resp) => {
-                let response_content = resp.response();
+            Ok(result) => {
+                // 保存用户在流式输出期间输入的内容
+                if !result.pending_input.is_empty() {
+                    self.pending_input = Some(result.pending_input);
+                }
+
+                let response_content = result.response.response();
                 self.context_manager
                     .add_message(Message::assistant(response_content));
 
@@ -367,8 +372,8 @@ impl OxideCli {
                     println!("{} Failed to save context: {}", "⚠️".yellow(), e);
                 }
 
-                self.add_session_tokens(resp.usage().total_tokens as u64);
-                self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
+                self.add_session_tokens(result.response.usage().total_tokens as u64);
+                self.show_token_usage_animated(result.response.usage().total_tokens as u64).await;
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::Interrupted
@@ -462,7 +467,7 @@ impl OxideCli {
         // Create session hook
         let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
 
-        let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
+        let response_result: Result<StreamResult, std::io::Error> = match &self.agent {
             AgentType::OpenAI(agent) => {
                 let mut stream = agent
                     .stream_prompt(&enhanced_input)
@@ -487,9 +492,14 @@ impl OxideCli {
         };
 
         match response_result {
-            Ok(resp) => {
+            Ok(result) => {
+                // 保存用户在流式输出期间输入的内容
+                if !result.pending_input.is_empty() {
+                    self.pending_input = Some(result.pending_input);
+                }
+
                 // Get response content and add to context
-                let response_content = resp.response();
+                let response_content = result.response.response();
                 self.context_manager
                     .add_message(Message::assistant(response_content));
 
@@ -498,12 +508,8 @@ impl OxideCli {
                     println!("{} Failed to save context: {}", "⚠️".yellow(), e);
                 }
 
-                // We can't easily get token usage from the stream response in rig currently without more complex handling,
-                // or if stream_to_stdout returns it.
-                // rig 0.28 stream_to_stdout returns Result<StreamingResponse> which has a usage method?
-                // Let's assume it works.
-                self.add_session_tokens(resp.usage().total_tokens as u64);
-                self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
+                self.add_session_tokens(result.response.usage().total_tokens as u64);
+                self.show_token_usage_animated(result.response.usage().total_tokens as u64).await;
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::Interrupted
@@ -1526,7 +1532,7 @@ impl OxideCli {
 
         let hook = SessionIdHook::new(self.context_manager.session_id().to_string());
 
-        let response_result: Result<rig::agent::FinalResponse, std::io::Error> = match &self.agent {
+        let response_result: Result<StreamResult, std::io::Error> = match &self.agent {
             AgentType::OpenAI(agent) => {
                 let mut stream = agent
                     .stream_prompt(&rendered_prompt)
@@ -1535,7 +1541,7 @@ impl OxideCli {
                     .with_history(self.context_manager.get_messages().to_vec())
                     .await;
                 self.spinner.stop();
-                super::render::stream_with_animation(&mut stream).await
+                stream_with_animation(&mut stream).await
             }
             AgentType::Anthropic(agent) => {
                 let mut stream = agent
@@ -1545,13 +1551,18 @@ impl OxideCli {
                     .with_history(self.context_manager.get_messages().to_vec())
                     .await;
                 self.spinner.stop();
-                super::render::stream_with_animation(&mut stream).await
+                stream_with_animation(&mut stream).await
             }
         };
 
         match response_result {
-            Ok(resp) => {
-                let response_content = resp.response();
+            Ok(result) => {
+                // 保存用户在流式输出期间输入的内容
+                if !result.pending_input.is_empty() {
+                    self.pending_input = Some(result.pending_input);
+                }
+
+                let response_content = result.response.response();
                 self.context_manager
                     .add_message(Message::assistant(response_content));
 
@@ -1559,8 +1570,8 @@ impl OxideCli {
                     println!("{} Failed to save context: {}", "⚠️".yellow(), e);
                 }
 
-                self.add_session_tokens(resp.usage().total_tokens as u64);
-                self.show_token_usage_animated(resp.usage().total_tokens as u64).await;
+                self.add_session_tokens(result.response.usage().total_tokens as u64);
+                self.show_token_usage_animated(result.response.usage().total_tokens as u64).await;
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::Interrupted
