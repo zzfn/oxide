@@ -357,8 +357,6 @@ impl OxideCli {
             }
         };
 
-        println!();
-
         match response_result {
             Ok(resp) => {
                 let response_content = resp.response();
@@ -487,8 +485,6 @@ impl OxideCli {
                 stream_with_animation(&mut stream).await
             }
         };
-
-        println!();
 
         match response_result {
             Ok(resp) => {
@@ -1552,8 +1548,6 @@ impl OxideCli {
                 super::render::stream_with_animation(&mut stream).await
             }
         };
-
-        println!();
 
         match response_result {
             Ok(resp) => {

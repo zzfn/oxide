@@ -233,9 +233,6 @@ impl MarkdownStreamRenderer {
             let rendered = skin.inline(&line);
             Self::print_in_scroll_region(&rendered.to_string());
         }
-
-        // 输出额外的空行分隔
-        Self::print_in_scroll_region("");
     }
 }
 
