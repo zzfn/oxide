@@ -155,17 +155,22 @@ impl MarkdownStreamRenderer {
         }
     }
 
-    /// 在输入框上方固定位置显示 loading（不参与滚动）
+    /// 在输入框上边框位置显示 loading（临时覆盖边框）
     fn print_loading_above_input(text: &str) {
         let mut stdout = stdout();
-        if let Ok((_, height)) = terminal::size() {
-            // loading 显示在输入框上边框上方一行（height-6）
-            let loading_row = height.saturating_sub(6);
+        if let Ok((width, height)) = terminal::size() {
+            // loading 显示在输入框上边框位置（height-5）
+            let loading_row = height.saturating_sub(5);
 
             let _ = queue!(stdout, cursor::SavePosition);
             let _ = queue!(stdout, MoveTo(0, loading_row));
             let _ = queue!(stdout, Clear(ClearType::CurrentLine));
             let _ = queue!(stdout, crossterm::style::Print(text));
+            // 填充剩余空间，避免显示不完整
+            let text_len = text.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum::<usize>();
+            if text_len < width as usize {
+                let _ = queue!(stdout, crossterm::style::Print(" ".repeat(width as usize - text_len)));
+            }
             let _ = queue!(stdout, cursor::RestorePosition);
             let _ = stdout.flush();
         } else {
@@ -175,15 +180,24 @@ impl MarkdownStreamRenderer {
         }
     }
 
-    /// 清除输入框上方的 loading 行
-    fn clear_loading_above_input() {
+    /// 清除 loading 并重新绘制输入框上边框
+    fn clear_loading_and_restore_border() {
         let mut stdout = stdout();
-        if let Ok((_, height)) = terminal::size() {
-            let loading_row = height.saturating_sub(6);
+        if let Ok((width, height)) = terminal::size() {
+            let top_row = height.saturating_sub(5);
+            let inner_width = width.saturating_sub(2) as usize;
 
             let _ = queue!(stdout, cursor::SavePosition);
-            let _ = queue!(stdout, MoveTo(0, loading_row));
+            let _ = queue!(stdout, MoveTo(0, top_row));
             let _ = queue!(stdout, Clear(ClearType::CurrentLine));
+
+            // 重新绘制上边框
+            let _ = queue!(stdout, crossterm::style::SetForegroundColor(crossterm::style::Color::DarkGrey));
+            let _ = queue!(stdout, crossterm::style::Print("╭"));
+            let _ = queue!(stdout, crossterm::style::Print("─".repeat(inner_width)));
+            let _ = queue!(stdout, crossterm::style::Print("╮"));
+            let _ = queue!(stdout, crossterm::style::ResetColor);
+
             let _ = queue!(stdout, cursor::RestorePosition);
             let _ = stdout.flush();
         }
@@ -253,8 +267,8 @@ where
         loop {
             tokio::select! {
                 _ = &mut stop_spinner_rx => {
-                    // 停止 spinner，清除 loading 行
-                    MarkdownStreamRenderer::clear_loading_above_input();
+                    // 停止 spinner，清除 loading 并恢复边框
+                    MarkdownStreamRenderer::clear_loading_and_restore_border();
                     break;
                 }
                 _ = ticker.tick() => {
