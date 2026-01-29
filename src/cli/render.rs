@@ -155,14 +155,15 @@ impl MarkdownStreamRenderer {
         }
     }
 
-    /// 在滚动区域底部原地更新（不滚动，用于 spinner 动画）
-    fn print_at_scroll_bottom(text: &str) {
+    /// 在输入框上方固定位置显示 loading（不参与滚动）
+    fn print_loading_above_input(text: &str) {
         let mut stdout = stdout();
         if let Ok((_, height)) = terminal::size() {
-            let scroll_bottom = height.saturating_sub(6);
+            // loading 显示在输入框上边框上方一行（height-6）
+            let loading_row = height.saturating_sub(6);
 
             let _ = queue!(stdout, cursor::SavePosition);
-            let _ = queue!(stdout, MoveTo(0, scroll_bottom));
+            let _ = queue!(stdout, MoveTo(0, loading_row));
             let _ = queue!(stdout, Clear(ClearType::CurrentLine));
             let _ = queue!(stdout, crossterm::style::Print(text));
             let _ = queue!(stdout, cursor::RestorePosition);
@@ -170,6 +171,20 @@ impl MarkdownStreamRenderer {
         } else {
             // 回退到普通输出
             print!("\r{}", text);
+            let _ = stdout.flush();
+        }
+    }
+
+    /// 清除输入框上方的 loading 行
+    fn clear_loading_above_input() {
+        let mut stdout = stdout();
+        if let Ok((_, height)) = terminal::size() {
+            let loading_row = height.saturating_sub(6);
+
+            let _ = queue!(stdout, cursor::SavePosition);
+            let _ = queue!(stdout, MoveTo(0, loading_row));
+            let _ = queue!(stdout, Clear(ClearType::CurrentLine));
+            let _ = queue!(stdout, cursor::RestorePosition);
             let _ = stdout.flush();
         }
     }
@@ -228,22 +243,24 @@ where
     let (stop_spinner_tx, mut stop_spinner_rx) = oneshot::channel();
     let mut stop_spinner_tx = Some(stop_spinner_tx);
 
-    // 启动动画 spinner（在滚动区域内）
+    // 启动动画 spinner（在输入框上方固定位置，带计时）
     let mut spinner_handle = Some(tokio::spawn(async move {
         let mut frame = 0;
         let mut ticker = interval(Duration::from_millis(100));
+        let start_time = std::time::Instant::now();
         ticker.tick().await;
 
         loop {
             tokio::select! {
                 _ = &mut stop_spinner_rx => {
-                    // 停止 spinner，显示静态图标
-                    MarkdownStreamRenderer::print_at_scroll_bottom(&format!("● oxide: "));
+                    // 停止 spinner，清除 loading 行
+                    MarkdownStreamRenderer::clear_loading_above_input();
                     break;
                 }
                 _ = ticker.tick() => {
                     let spinner = SPINNER_FRAMES[frame % SPINNER_FRAMES.len()];
-                    MarkdownStreamRenderer::print_at_scroll_bottom(&format!("{} oxide:", spinner.blue()));
+                    let elapsed = start_time.elapsed().as_secs();
+                    MarkdownStreamRenderer::print_loading_above_input(&format!("{} oxide: {}s", spinner.blue(), elapsed));
                     frame += 1;
                 }
             }
