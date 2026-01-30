@@ -9,6 +9,10 @@ use std::env;
 pub mod vars {
     /// Anthropic API Key
     pub const ANTHROPIC_API_KEY: &str = "ANTHROPIC_API_KEY";
+    /// Oxide Auth Token (自定义 API Key)
+    pub const OXIDE_AUTH_TOKEN: &str = "OXIDE_AUTH_TOKEN";
+    /// Oxide Base URL (自定义 API 端点)
+    pub const OXIDE_BASE_URL: &str = "OXIDE_BASE_URL";
     /// OpenAI API Key (备用)
     pub const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
     /// Oxide 主目录覆盖
@@ -23,14 +27,20 @@ pub mod vars {
 pub struct Env;
 
 impl Env {
-    /// 获取 Anthropic API Key
-    pub fn anthropic_api_key() -> Result<String> {
-        env::var(vars::ANTHROPIC_API_KEY)
+    /// 获取 API Key（优先使用 OXIDE_AUTH_TOKEN，其次 ANTHROPIC_API_KEY）
+    pub fn api_key() -> Result<String> {
+        env::var(vars::OXIDE_AUTH_TOKEN)
+            .or_else(|_| env::var(vars::ANTHROPIC_API_KEY))
             .map_err(|_| OxideError::Config(format!(
-                "未设置 {} 环境变量。请运行: export {}=your_api_key",
-                vars::ANTHROPIC_API_KEY,
+                "未设置 API Key 环境变量。请运行: export {}=your_api_key 或 export {}=your_api_key",
+                vars::OXIDE_AUTH_TOKEN,
                 vars::ANTHROPIC_API_KEY
             )))
+    }
+
+    /// 获取 Base URL（可选，用于自定义 API 端点）
+    pub fn base_url() -> Option<String> {
+        env::var(vars::OXIDE_BASE_URL).ok()
     }
 
     /// 获取 OpenAI API Key（可选）

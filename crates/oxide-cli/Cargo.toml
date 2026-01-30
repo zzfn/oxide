@@ -19,6 +19,7 @@ crossterm = "0.29"
 termimad = "0.30"
 colored = "3.0"
 dirs = "5.0"
+async-trait = "0.1"
 
 [[bin]]
 name = "oxide"
