@@ -173,12 +173,9 @@ impl Repl {
         // 显示助手响应头部
         self.renderer.assistant_header();
 
-        // 运行代理
-        match agent_runner.run(&provider, input, chat_history).await {
+        // 运行代理（流式输出）
+        match agent_runner.run_stream(&provider, input, chat_history).await {
             Ok(response) => {
-                // 显示响应
-                println!("{}", response);
-
                 // 更新会话历史
                 {
                     let mut state = self.state.write().await;

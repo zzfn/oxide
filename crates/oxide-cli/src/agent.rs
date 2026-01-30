@@ -81,10 +81,80 @@ impl RigAgentRunner {
             format!("{}\n\n用户: {}", history_context, user_input)
         };
 
-        // 调用 Agent
+        // 调用 Agent（非流式）
         let response = agent.prompt(&prompt).await?;
 
         Ok(response)
+    }
+
+    /// 执行代理（流式输出）
+    ///
+    /// 使用 rig Agent 处理用户输入，支持流式输出
+    pub async fn run_stream(
+        &self,
+        provider: &RigAnthropicProvider,
+        user_input: &str,
+        chat_history: Vec<Message>,
+    ) -> Result<String> {
+        use rig::streaming::StreamingPrompt;
+        use rig::agent::MultiTurnStreamItem;
+        use rig::streaming::StreamedAssistantContent;
+        use futures::StreamExt;
+
+        // 创建工具列表（boxed）
+        let tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
+            .task_manager(self.task_manager.clone())
+            .build_boxed();
+
+        // 创建 rig Agent
+        let agent = provider.create_agent_with_tools(
+            self.system_prompt.as_deref(),
+            tools,
+        );
+
+        // 构建完整的提示（包含历史上下文）
+        let prompt = if chat_history.is_empty() {
+            user_input.to_string()
+        } else {
+            // 将历史消息转换为上下文字符串
+            let history_context = self.format_chat_history(&chat_history);
+            format!("{}\n\n用户: {}", history_context, user_input)
+        };
+
+        // 获取流式响应
+        let mut stream = agent.stream_prompt(&prompt).multi_turn(10).await;
+
+        // 收集完整响应
+        let mut full_response = String::new();
+
+        // 逐块处理流式输出
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
+                    // 打印文本到终端
+                    print!("{}", text.text);
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+
+                    // 收集完整响应
+                    full_response.push_str(&text.text);
+                }
+                Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
+                    // 最终响应
+                    full_response = final_res.response().to_string();
+                }
+                Ok(_) => {
+                    // 忽略其他类型（工具调用等）
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("流式输出错误: {}", e));
+                }
+            }
+        }
+
+        println!(); // 换行
+
+        Ok(full_response)
     }
 
     /// 格式化聊天历史为上下文字符串
