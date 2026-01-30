@@ -7,11 +7,13 @@ pub mod errors;
 pub mod exec;
 pub mod file;
 pub mod search;
+pub mod wrapper;
 
 pub use errors::*;
 pub use exec::*;
 pub use file::*;
 pub use search::*;
+pub use wrapper::ToolWrapper;
 
 use rig::tool::{ToolDyn, ToolSet};
 use std::path::PathBuf;
@@ -110,20 +112,20 @@ impl OxideToolSetBuilder {
         let task_manager = self.task_manager.unwrap_or_else(create_task_manager);
 
         if self.include_search {
-            tools.push(Box::new(RigGlobTool::new(self.working_dir.clone())));
-            tools.push(Box::new(RigGrepTool::new(self.working_dir.clone())));
+            tools.push(Box::new(ToolWrapper::new(RigGlobTool::new(self.working_dir.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigGrepTool::new(self.working_dir.clone()))));
         }
 
         if self.include_file {
-            tools.push(Box::new(RigReadTool::new(self.working_dir.clone())));
-            tools.push(Box::new(RigWriteTool::new(self.working_dir.clone())));
-            tools.push(Box::new(RigEditTool::new(self.working_dir.clone())));
+            tools.push(Box::new(ToolWrapper::new(RigReadTool::new(self.working_dir.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigWriteTool::new(self.working_dir.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigEditTool::new(self.working_dir.clone()))));
         }
 
         if self.include_exec {
-            tools.push(Box::new(RigBashTool::new(self.working_dir.clone(), task_manager.clone())));
-            tools.push(Box::new(RigTaskOutputTool::new(task_manager.clone())));
-            tools.push(Box::new(RigTaskStopTool::new(task_manager)));
+            tools.push(Box::new(ToolWrapper::new(RigBashTool::new(self.working_dir.clone(), task_manager.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigTaskOutputTool::new(task_manager.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigTaskStopTool::new(task_manager))));
         }
 
         tools
