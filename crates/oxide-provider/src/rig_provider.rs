@@ -71,7 +71,10 @@ impl RigAnthropicProvider {
         if let Some(sys) = preamble {
             builder = builder.preamble(sys);
         }
-        builder.tools(tools).build()
+        builder
+            .tools(tools)
+            .default_max_depth(10)  // 设置最大工具调用深度为 10
+            .build()
     }
 
     /// 创建不带工具的 Agent
