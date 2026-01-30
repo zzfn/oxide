@@ -10,9 +10,22 @@ use tokio::sync::RwLock;
 /// 需要用户确认的危险工具
 const DANGEROUS_TOOLS: &[&str] = &["Edit", "Write", "Bash"];
 
+/// 用户确认结果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationResult {
+    /// 允许本次执行
+    Allow,
+    /// 拒绝执行
+    Deny,
+    /// 始终允许（本次会话）
+    AllowSession,
+    /// 始终允许（持久化）
+    AllowAlways,
+}
+
 /// 确认回调类型
 pub type ConfirmationCallback = Arc<
-    dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync,
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = ConfirmationResult> + Send>> + Send + Sync,
 >;
 
 /// 权限管理器
@@ -72,15 +85,28 @@ impl PermissionManager {
     }
 
     /// 请求用户确认
-    /// 返回 Ok(true) 表示用户同意，Ok(false) 表示用户拒绝
+    /// 返回 Ok(ConfirmationResult) 表示用户的选择
     /// 返回 Err 表示没有配置确认回调
-    pub async fn request_confirmation(&self, tool_name: &str) -> Result<bool, ()> {
+    pub async fn request_confirmation(&self, tool_name: &str) -> Result<ConfirmationResult, ()> {
         if let Some(callback) = &self.confirmation_callback {
-            let approved = callback(tool_name.to_string()).await;
-            if approved {
-                self.approve_tool(tool_name).await;
+            let result = callback(tool_name.to_string()).await;
+            match result {
+                ConfirmationResult::Allow => {
+                    // 仅本次允许，不记录
+                }
+                ConfirmationResult::AllowSession => {
+                    // 本次会话内始终允许
+                    self.approve_tool(tool_name).await;
+                }
+                ConfirmationResult::AllowAlways => {
+                    // 持久化允许（TODO: 写入配置文件）
+                    self.approve_tool(tool_name).await;
+                }
+                ConfirmationResult::Deny => {
+                    // 拒绝，不做任何操作
+                }
             }
-            Ok(approved)
+            Ok(result)
         } else {
             Err(())
         }

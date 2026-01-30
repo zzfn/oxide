@@ -6,7 +6,7 @@ use anyhow::Result;
 use oxide_core::config::PermissionsConfig;
 use oxide_core::types::{ContentBlock, Message, Role};
 use oxide_provider::RigAnthropicProvider;
-use oxide_tools::{PermissionManager, TaskManager};
+use oxide_tools::{ConfirmationResult, PermissionManager, TaskManager};
 use rig::completion::Prompt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,21 +18,30 @@ use crate::render::Renderer;
 fn create_confirmation_callback() -> oxide_tools::ConfirmationCallback {
     Arc::new(|tool_name: String| {
         Box::pin(async move {
-            use dialoguer::{theme::ColorfulTheme, Confirm};
+            use dialoguer::{theme::ColorfulTheme, Select};
 
             let theme = ColorfulTheme::default();
-            let prompt = format!(
-                "工具 '{}' 是危险操作，是否允许执行？",
-                tool_name
-            );
+            let prompt = format!("工具 '{}' 需要权限确认", tool_name);
 
-            match Confirm::with_theme(&theme)
+            let items = vec![
+                "允许本次",
+                "始终允许（本次会话）",
+                "始终允许（记住选择）",
+                "拒绝",
+            ];
+
+            match Select::with_theme(&theme)
                 .with_prompt(&prompt)
-                .default(true)
+                .items(&items)
+                .default(0)
                 .interact()
             {
-                Ok(confirmed) => confirmed,
-                Err(_) => false, // 出错时默认拒绝
+                Ok(0) => ConfirmationResult::Allow,
+                Ok(1) => ConfirmationResult::AllowSession,
+                Ok(2) => ConfirmationResult::AllowAlways,
+                Ok(3) => ConfirmationResult::Deny,
+                Ok(_) => ConfirmationResult::Deny,
+                Err(_) => ConfirmationResult::Deny, // 出错时默认拒绝
             }
         })
     })

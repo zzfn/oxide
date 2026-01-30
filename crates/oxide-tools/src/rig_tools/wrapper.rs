@@ -2,7 +2,7 @@
 //!
 //! 包装 rig Tool，在执行前后显示进度信息并检查权限
 
-use crate::permission::PermissionManager;
+use crate::permission::{ConfirmationResult, PermissionManager};
 use crate::rig_tools::errors::{PermissionError, WrappedError};
 use colored::Colorize;
 use rig::completion::ToolDefinition;
@@ -122,7 +122,9 @@ where
                 // 2. 检查是否需要用户确认
                 if pm.requires_confirmation(T::NAME).await {
                     match pm.request_confirmation(T::NAME).await {
-                        Ok(true) => {
+                        Ok(ConfirmationResult::Allow)
+                        | Ok(ConfirmationResult::AllowSession)
+                        | Ok(ConfirmationResult::AllowAlways) => {
                             // 用户同意，继续执行
                             if show_progress {
                                 println!(
@@ -133,7 +135,7 @@ where
                                 let _ = std::io::stdout().flush();
                             }
                         }
-                        Ok(false) => {
+                        Ok(ConfirmationResult::Deny) => {
                             // 用户拒绝
                             if show_progress {
                                 println!(
@@ -319,7 +321,7 @@ mod tests {
         // 用户同意执行危险工具
         let config = PermissionsConfig::default();
         let callback: ConfirmationCallback = Arc::new(|_tool_name| {
-            Box::pin(async move { true })
+            Box::pin(async move { ConfirmationResult::AllowSession })
         });
         let pm = PermissionManager::new(config).with_confirmation_callback(callback);
 
@@ -338,7 +340,7 @@ mod tests {
         // 用户拒绝执行危险工具
         let config = PermissionsConfig::default();
         let callback: ConfirmationCallback = Arc::new(|_tool_name| {
-            Box::pin(async move { false })
+            Box::pin(async move { ConfirmationResult::Deny })
         });
         let pm = PermissionManager::new(config).with_confirmation_callback(callback);
 
@@ -398,7 +400,7 @@ mod tests {
 
         let callback: ConfirmationCallback = Arc::new(move |_tool_name| {
             call_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Box::pin(async move { true })
+            Box::pin(async move { ConfirmationResult::AllowSession })
         });
         let pm = PermissionManager::new(config).with_confirmation_callback(callback);
 

@@ -88,13 +88,13 @@ pub enum RigToolError {
 /// 权限错误
 #[derive(Debug, Error)]
 pub enum PermissionError {
-    #[error("工具 '{0}' 被权限配置禁止执行")]
+    #[error("权限被拒绝: 工具 '{0}' 被配置禁止执行，操作未执行")]
     ToolDenied(String),
 
-    #[error("工具 '{0}' 需要用户确认，但用户拒绝执行")]
+    #[error("用户拒绝: 用户拒绝执行工具 '{0}'，操作未执行。请告知用户操作已取消，不要假装操作成功。")]
     UserRejected(String),
 
-    #[error("工具 '{0}' 需要用户确认，但未配置确认处理器")]
+    #[error("权限错误: 工具 '{0}' 需要用户确认，但未配置确认处理器，操作未执行")]
     NoConfirmationHandler(String),
 }
 
