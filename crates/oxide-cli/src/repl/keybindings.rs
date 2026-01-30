@@ -80,5 +80,12 @@ pub fn create_keybindings() -> Keybindings {
         ReedlineEvent::Edit(vec![EditCommand::MoveWordLeft { select: false }]),
     );
 
+    // Tab: 触发补全菜单
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Tab,
+        ReedlineEvent::Menu("completion_menu".to_string()),
+    );
+
     keybindings
 }
