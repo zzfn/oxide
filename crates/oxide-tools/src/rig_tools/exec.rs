@@ -11,8 +11,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use super::{errors::ExecError, TaskManager};
-use crate::exec::BackgroundTask;
+use super::errors::ExecError;
+use crate::task::TaskManager;
 
 // ============================================================================
 // Bash 工具
@@ -130,19 +130,7 @@ impl RigBashTool {
         let task_id = uuid::Uuid::new_v4().to_string();
 
         // 创建任务记录
-        {
-            let mut tasks = self.task_manager.write().await;
-            tasks.insert(
-                task_id.clone(),
-                BackgroundTask {
-                    _id: task_id.clone(),
-                    _command: command.to_string(),
-                    output: String::new(),
-                    is_running: true,
-                    exit_code: None,
-                },
-            );
-        }
+        self.task_manager.add_background_task(task_id.clone(), command.to_string()).await;
 
         // 启动后台任务
         let task_id_clone = task_id.clone();
@@ -196,20 +184,19 @@ impl RigBashTool {
                     let status = child.wait().await;
                     let exit_code = status.ok().and_then(|s| s.code());
 
-                    let mut tasks = task_manager.write().await;
-                    if let Some(task) = tasks.get_mut(&task_id_clone) {
+                    // 更新任务状态
+                    task_manager.update_background_task(&task_id_clone, |task| {
                         task.output = output;
                         task.is_running = false;
                         task.exit_code = exit_code;
-                    }
+                    }).await;
                 }
                 Err(e) => {
-                    let mut tasks = task_manager.write().await;
-                    if let Some(task) = tasks.get_mut(&task_id_clone) {
+                    task_manager.update_background_task(&task_id_clone, |task| {
                         task.output = format!("启动命令失败: {}", e);
                         task.is_running = false;
                         task.exit_code = Some(-1);
-                    }
+                    }).await;
                 }
             }
         });
@@ -366,10 +353,7 @@ impl Tool for RigTaskOutputTool {
             let start = std::time::Instant::now();
 
             loop {
-                let task = {
-                    let tasks = self.task_manager.read().await;
-                    tasks.get(&args.task_id).cloned()
-                };
+                let task = self.task_manager.get_background_task(&args.task_id).await;
 
                 match task {
                     Some(task) if !task.is_running => {
@@ -393,8 +377,7 @@ impl Tool for RigTaskOutputTool {
                 }
             }
         } else {
-            let tasks = self.task_manager.read().await;
-            match tasks.get(&args.task_id) {
+            match self.task_manager.get_background_task(&args.task_id).await {
                 Some(task) => {
                     let success = !task.is_running && task.exit_code == Some(0);
                     Ok(TaskOutputOutput {
@@ -467,11 +450,12 @@ impl Tool for RigTaskStopTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let mut tasks = self.task_manager.write().await;
-        match tasks.get_mut(&args.task_id) {
+        match self.task_manager.get_background_task(&args.task_id).await {
             Some(task) if task.is_running => {
-                task.is_running = false;
-                task.exit_code = Some(-1);
+                self.task_manager.update_background_task(&args.task_id, |task| {
+                    task.is_running = false;
+                    task.exit_code = Some(-1);
+                }).await;
                 Ok(TaskStopOutput {
                     task_id: args.task_id,
                     stopped: true,

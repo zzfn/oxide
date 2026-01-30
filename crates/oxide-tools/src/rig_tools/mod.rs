@@ -17,18 +17,15 @@ pub use wrapper::ToolWrapper;
 
 use rig::tool::{ToolDyn, ToolSet};
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use std::collections::HashMap;
 
-use crate::exec::BackgroundTask;
+use crate::task::TaskManager;
 
-/// 后台任务管理器类型
-pub type TaskManager = Arc<RwLock<HashMap<String, BackgroundTask>>>;
+// 重新导出 TaskManager
+pub use crate::task::TaskManager as TaskManagerType;
 
 /// 创建新的任务管理器
 pub fn create_task_manager() -> TaskManager {
-    Arc::new(RwLock::new(HashMap::new()))
+    TaskManager::new()
 }
 
 /// Oxide 工具集构建器
@@ -40,6 +37,7 @@ pub struct OxideToolSetBuilder {
     include_search: bool,
     include_file: bool,
     include_exec: bool,
+    include_task: bool,
 }
 
 impl OxideToolSetBuilder {
@@ -51,6 +49,7 @@ impl OxideToolSetBuilder {
             include_search: true,
             include_file: true,
             include_exec: true,
+            include_task: true,
         }
     }
 
@@ -78,6 +77,12 @@ impl OxideToolSetBuilder {
         self
     }
 
+    /// 是否包含任务管理工具 (TaskCreate, TaskList, TaskGet, TaskUpdate)
+    pub fn task_tools(mut self, include: bool) -> Self {
+        self.include_task = include;
+        self
+    }
+
     /// 构建 ToolSet
     pub fn build(self) -> ToolSet {
         let mut toolset = ToolSet::default();
@@ -100,7 +105,16 @@ impl OxideToolSetBuilder {
         if self.include_exec {
             toolset.add_tool(RigBashTool::new(self.working_dir.clone(), task_manager.clone()));
             toolset.add_tool(RigTaskOutputTool::new(task_manager.clone()));
-            toolset.add_tool(RigTaskStopTool::new(task_manager));
+            toolset.add_tool(RigTaskStopTool::new(task_manager.clone()));
+        }
+
+        // 添加任务管理工具
+        if self.include_task {
+            use crate::task::tools::*;
+            toolset.add_tool(RigTaskCreateTool::new(task_manager.clone()));
+            toolset.add_tool(RigTaskListTool::new(task_manager.clone()));
+            toolset.add_tool(RigTaskGetTool::new(task_manager.clone()));
+            toolset.add_tool(RigTaskUpdateTool::new(task_manager.clone()));
         }
 
         toolset
@@ -125,7 +139,15 @@ impl OxideToolSetBuilder {
         if self.include_exec {
             tools.push(Box::new(ToolWrapper::new(RigBashTool::new(self.working_dir.clone(), task_manager.clone()))));
             tools.push(Box::new(ToolWrapper::new(RigTaskOutputTool::new(task_manager.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigTaskStopTool::new(task_manager))));
+            tools.push(Box::new(ToolWrapper::new(RigTaskStopTool::new(task_manager.clone()))));
+        }
+
+        if self.include_task {
+            use crate::task::tools::*;
+            tools.push(Box::new(ToolWrapper::new(RigTaskCreateTool::new(task_manager.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigTaskListTool::new(task_manager.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigTaskGetTool::new(task_manager.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigTaskUpdateTool::new(task_manager.clone()))));
         }
 
         tools

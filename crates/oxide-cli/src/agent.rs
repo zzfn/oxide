@@ -5,7 +5,7 @@
 use anyhow::Result;
 use oxide_core::types::{ContentBlock, Message, Role};
 use oxide_provider::RigAnthropicProvider;
-use oxide_tools::rig_tools::TaskManager;
+use oxide_tools::TaskManager;
 use rig::completion::Prompt;
 use std::path::PathBuf;
 use std::sync::Arc;

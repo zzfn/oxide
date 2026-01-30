@@ -155,11 +155,12 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 - [ ] 权限请求系统
 
 #### 3.3 任务管理系统
-- [ ] **TaskCreate**: 创建任务
-- [ ] **TaskList**: 列出任务
-- [ ] **TaskGet**: 获取任务详情
-- [ ] **TaskUpdate**: 更新任务状态
-- [ ] 任务依赖关系管理
+- [x] **TaskCreate**: 创建任务
+- [x] **TaskList**: 列出任务
+- [x] **TaskGet**: 获取任务详情
+- [x] **TaskUpdate**: 更新任务状态
+- [x] 任务依赖关系管理
+- [x] 循环依赖检测
 - [ ] 任务持久化
 
 #### 3.4 用户交互
@@ -499,8 +500,13 @@ oxide/
   - 代理主循环已完成（工具调用、流式输出）
   - 待完成: 网页获取 (WebFetch)
 
+- **Phase 3 (高级功能)**: 20% 完成
+  - 任务管理系统已完成 (TaskCreate, TaskList, TaskGet, TaskUpdate)
+  - 任务依赖关系管理和循环依赖检测已完成
+  - 待完成: 子代理系统、计划模式、用户交互工具
+
 ### ⏳ 未开始
-- **Phase 3 (高级功能)**: 代理系统、计划模式、任务管理
+- **Phase 3 (高级功能 - 剩余部分)**: 子代理系统、计划模式、用户交互
 - **Phase 5 (Git 集成)**: Git 操作、GitHub 集成
 - **Phase 6 (扩展功能)**: 技能系统、MCP 支持、IDE 集成
 - **Phase 7 (优化完善)**: 性能优化、测试、文档、安全性
@@ -511,6 +517,10 @@ oxide/
 3. ✅ ~~实现命令执行工具 (Bash)~~
 4. ✅ ~~实现搜索工具 (Glob, Grep)~~
 5. ✅ ~~完成代理主循环，实现工具调用~~
-6. 实现网页获取工具 (WebFetch)
-7. 端到端测试和优化
+6. ✅ ~~实现任务管理系统 (TaskCreate, TaskList, TaskGet, TaskUpdate)~~
+7. 实现子代理系统 (Task Tool)
+8. 实现计划模式 (EnterPlanMode, ExitPlanMode)
+9. 实现用户交互工具 (AskUserQuestion)
+10. 实现网页获取工具 (WebFetch)
+11. 端到端测试和优化
 

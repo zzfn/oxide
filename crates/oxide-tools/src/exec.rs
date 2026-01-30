@@ -14,6 +14,7 @@ use tokio::sync::RwLock;
 use tokio::time::timeout;
 
 use crate::registry::{Tool, ToolResult, ToolSchema};
+use crate::task::{BackgroundTask, TaskManager};
 
 /// Bash 工具参数
 #[derive(Debug, Deserialize)]
@@ -51,37 +52,6 @@ struct TaskStopParams {
     task_id: String,
 }
 
-/// 后台任务信息
-#[derive(Debug, Clone)]
-pub struct BackgroundTask {
-    pub _id: String,
-    pub _command: String,
-    pub output: String,
-    pub is_running: bool,
-    pub exit_code: Option<i32>,
-}
-
-impl BackgroundTask {
-    /// 创建新的后台任务
-    pub fn new(id: String, command: String) -> Self {
-        Self {
-            _id: id,
-            _command: command,
-            output: String::new(),
-            is_running: true,
-            exit_code: None,
-        }
-    }
-}
-
-/// 后台任务管理器
-pub type TaskManager = Arc<RwLock<HashMap<String, BackgroundTask>>>;
-
-/// 创建新的任务管理器
-pub fn create_task_manager() -> TaskManager {
-    Arc::new(RwLock::new(HashMap::new()))
-}
-
 /// Bash 工具 - 命令执行
 pub struct BashTool {
     working_dir: PathBuf,
@@ -92,7 +62,7 @@ impl BashTool {
     pub fn new(working_dir: PathBuf) -> Self {
         Self {
             working_dir,
-            task_manager: create_task_manager(),
+            task_manager: crate::create_task_manager(),
         }
     }
 
@@ -180,19 +150,7 @@ impl BashTool {
         let task_id = uuid::Uuid::new_v4().to_string();
 
         // 创建任务记录
-        {
-            let mut tasks = self.task_manager.write().await;
-            tasks.insert(
-                task_id.clone(),
-                BackgroundTask {
-                    _id: task_id.clone(),
-                    _command: command.to_string(),
-                    output: String::new(),
-                    is_running: true,
-                    exit_code: None,
-                },
-            );
-        }
+        self.task_manager.add_background_task(task_id.clone(), command.to_string()).await;
 
         // 启动后台任务
         let task_id_clone = task_id.clone();
@@ -247,20 +205,18 @@ impl BashTool {
                     let exit_code = status.ok().and_then(|s| s.code());
 
                     // 更新任务状态
-                    let mut tasks = task_manager.write().await;
-                    if let Some(task) = tasks.get_mut(&task_id_clone) {
+                    task_manager.update_background_task(&task_id_clone, |task| {
                         task.output = output;
                         task.is_running = false;
                         task.exit_code = exit_code;
-                    }
+                    }).await;
                 }
                 Err(e) => {
-                    let mut tasks = task_manager.write().await;
-                    if let Some(task) = tasks.get_mut(&task_id_clone) {
+                    task_manager.update_background_task(&task_id_clone, |task| {
                         task.output = format!("启动命令失败: {}", e);
                         task.is_running = false;
                         task.exit_code = Some(-1);
-                    }
+                    }).await;
                 }
             }
         });
@@ -391,10 +347,7 @@ impl Tool for TaskOutputTool {
             let start = std::time::Instant::now();
 
             loop {
-                let task = {
-                    let tasks = self.task_manager.read().await;
-                    tasks.get(&params.task_id).cloned()
-                };
+                let task = self.task_manager.get_background_task(&params.task_id).await;
 
                 match task {
                     Some(task) if !task.is_running => {
@@ -428,8 +381,7 @@ impl Tool for TaskOutputTool {
             }
         } else {
             // 立即返回当前状态
-            let tasks = self.task_manager.read().await;
-            match tasks.get(&params.task_id) {
+            match self.task_manager.get_background_task(&params.task_id).await {
                 Some(task) => {
                     let status = if task.is_running {
                         "运行中"
@@ -492,12 +444,13 @@ impl Tool for TaskStopTool {
     async fn execute(&self, input: Value) -> anyhow::Result<ToolResult> {
         let params: TaskStopParams = serde_json::from_value(input)?;
 
-        let mut tasks = self.task_manager.write().await;
-        match tasks.get_mut(&params.task_id) {
+        match self.task_manager.get_background_task(&params.task_id).await {
             Some(task) if task.is_running => {
                 // 注意：这里只是标记任务为停止，实际的进程终止需要更复杂的实现
-                task.is_running = false;
-                task.exit_code = Some(-1);
+                self.task_manager.update_background_task(&params.task_id, |task| {
+                    task.is_running = false;
+                    task.exit_code = Some(-1);
+                }).await;
                 Ok(ToolResult::success(format!(
                     "✓ 任务已标记为停止: {}",
                     params.task_id

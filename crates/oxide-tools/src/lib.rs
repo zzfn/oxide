@@ -15,13 +15,20 @@ pub mod file;
 pub mod registry;
 pub mod rig_tools;
 pub mod search;
+pub mod task;
 pub mod web;
 
 // 重新导出常用类型
-pub use exec::{create_task_manager, BashTool, TaskOutputTool, TaskStopTool};
+pub use exec::{BashTool, TaskOutputTool, TaskStopTool};
 pub use file::{EditTool, ReadTool, WriteTool};
 pub use registry::{Tool, ToolRegistry, ToolResult, ToolSchema};
 pub use search::{GlobTool, GrepTool};
+pub use task::{Task, TaskError, TaskManager, TaskStatus};
+
+// 创建任务管理器的工厂函数
+pub fn create_task_manager() -> TaskManager {
+    TaskManager::new()
+}
 
 // 重新导出 rig 适配工具
 pub use rig_tools::{
