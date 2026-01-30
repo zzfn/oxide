@@ -1,15 +1,15 @@
 # Oxide Provider
 
-LLM 提供商适配层，支持与 Anthropic Claude API 集成。
+LLM 提供商适配层，基于 [rig-core](https://github.com/0xPlaygrounds/rig) 库，支持 20+ LLM 提供商。
 
 ## 功能特性
 
-- ✅ 完整的 Anthropic API 支持
-- ✅ 流式响应（Server-Sent Events）
-- ✅ 多模态内容（文本、图片）
-- ✅ 工具调用协议（Tool Use）
-- ✅ 自定义 API 端点
-- ✅ 灵活的配置选项
+- ✅ 基于 rig-core 的成熟实现
+- ✅ 支持 Anthropic Claude API
+- ✅ 支持自定义 API 端点
+- ✅ 流式响应支持
+- ✅ 工具调用支持（通过 rig Tool trait）
+- ✅ 可扩展支持更多 LLM 提供商
 
 ## 环境变量配置
 
@@ -41,10 +41,10 @@ export OXIDE_BASE_URL=https://your-custom-endpoint.com
 ### 模型选择
 
 ```bash
-export OXIDE_MODEL=claude-sonnet-4-5-20250929
+export OXIDE_MODEL=claude-sonnet-4-20250514
 ```
 
-默认值：`claude-sonnet-4-5-20250929`
+默认值：`claude-sonnet-4-20250514`
 
 ## 使用示例
 
@@ -52,14 +52,14 @@ export OXIDE_MODEL=claude-sonnet-4-5-20250929
 
 ```rust
 use oxide_core::types::{Message, Role};
-use oxide_provider::{AnthropicProvider, LLMProvider};
+use oxide_provider::{RigAnthropicProvider, LLMProvider};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 创建 Provider
-    let provider = AnthropicProvider::new(
+    let provider = RigAnthropicProvider::new(
         "your_api_key".to_string(),
-        Some("claude-sonnet-4-5-20250929".to_string())
+        Some("claude-sonnet-4-20250514".to_string())
     );
 
     // 发送消息
@@ -74,13 +74,14 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-### 自定义配置
+### 自定义端点
 
 ```rust
-let provider = AnthropicProvider::new(api_key, None)
-    .with_base_url("https://custom-api.com".to_string())
-    .with_max_tokens(4096)
-    .with_temperature(0.7);
+let provider = RigAnthropicProvider::with_base_url(
+    api_key,
+    "https://custom-api.com".to_string(),
+    None
+);
 ```
 
 ### 流式响应
@@ -98,6 +99,46 @@ provider.complete_stream(
 ).await?;
 ```
 
+### 使用 rig-core 工具
+
+```rust
+use oxide_provider::{Tool, ToolDefinition, ToolSet};
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+struct MyToolArgs {
+    input: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MyTool;
+
+impl Tool for MyTool {
+    const NAME: &'static str = "my_tool";
+    type Error = anyhow::Error;
+    type Args = MyToolArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "my_tool".to_string(),
+            description: "My custom tool".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "input": { "type": "string" }
+                },
+                "required": ["input"]
+            })
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        Ok(format!("Processed: {}", args.input))
+    }
+}
+```
+
 ## 运行测试示例
 
 ```bash
@@ -109,46 +150,19 @@ export OXIDE_BASE_URL=https://api.anthropic.com  # 可选
 cargo run --example test_api --package oxide-provider
 ```
 
-## API 兼容性
-
-本实现遵循 Anthropic Messages API 规范：
-
-- API Version: `2023-06-01`
-- 支持的内容类型：
-  - `text` - 文本内容
-  - `image` - 图片（Base64 或 URL）
-  - `tool_use` - 工具调用
-  - `tool_result` - 工具结果
-
-## 错误处理
-
-Provider 使用 `anyhow::Result` 进行错误处理，所有 API 错误都会被转换为可读的错误消息。
-
-```rust
-match provider.complete(&messages).await {
-    Ok(response) => {
-        // 处理响应
-    }
-    Err(e) => {
-        eprintln!("API 错误: {}", e);
-    }
-}
-```
-
 ## 依赖项
 
-- `reqwest` - HTTP 客户端
+- `rig-core` - LLM 框架
 - `tokio` - 异步运行时
 - `serde` / `serde_json` - 序列化
-- `futures` - 流式处理
+- `anyhow` - 错误处理
 
 ## 开发状态
 
-✅ **Phase 1 完成** - LLM 集成已完成
+✅ **已完成** - 基于 rig-core 的 LLM 集成
 
-- [x] Provider trait 定义
-- [x] Anthropic API 客户端
+- [x] RigAnthropicProvider 实现
+- [x] 自定义端点支持
 - [x] 流式响应支持
-- [x] 消息格式转换
-- [x] 工具调用协议
-- [x] 多模态内容支持
+- [x] rig Tool trait 导出
+- [ ] 多 LLM 提供商支持（OpenAI, Gemini 等）

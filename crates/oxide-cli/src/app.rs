@@ -3,10 +3,13 @@
 //! 管理 CLI 的全局状态，包括运行模式、Token 使用统计、会话信息等。
 
 use oxide_core::types::Conversation;
-use oxide_provider::LLMProvider;
+use oxide_provider::{LLMProvider, RigAnthropicProvider};
+use oxide_tools::ToolRegistry;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+use crate::agent::RigAgentRunner;
 
 /// CLI 运行模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -121,8 +124,14 @@ pub struct AppState {
     pub ctrl_c_count: u8,
     /// 当前会话的对话历史
     pub conversation: Conversation,
-    /// LLM Provider
+    /// LLM Provider（旧版，兼容用）
     pub provider: Option<Arc<dyn LLMProvider>>,
+    /// 工具注册表（旧版，兼容用）
+    pub tool_registry: Option<Arc<ToolRegistry>>,
+    /// Rig Anthropic Provider（新版）
+    pub rig_provider: Option<Arc<RigAnthropicProvider>>,
+    /// Rig Agent Runner（新版）
+    pub agent_runner: Option<RigAgentRunner>,
 }
 
 impl AppState {
@@ -138,12 +147,27 @@ impl AppState {
             ctrl_c_count: 0,
             conversation: Conversation::new(),
             provider: None,
+            tool_registry: None,
+            rig_provider: None,
+            agent_runner: None,
         }
     }
 
-    /// 设置 LLM Provider
+    /// 设置 LLM Provider（旧版）
     pub fn set_provider(&mut self, provider: Arc<dyn LLMProvider>) {
         self.provider = Some(provider);
+    }
+
+    /// 设置工具注册表（旧版）
+    pub fn set_tool_registry(&mut self, registry: Arc<ToolRegistry>) {
+        self.tool_registry = Some(registry);
+    }
+
+    /// 设置 Rig Provider 和 Agent Runner（新版）
+    pub fn set_rig_provider(&mut self, provider: RigAnthropicProvider) {
+        let working_dir = self.working_dir.clone();
+        self.rig_provider = Some(Arc::new(provider));
+        self.agent_runner = Some(RigAgentRunner::new(working_dir));
     }
 
     /// 切换运行模式

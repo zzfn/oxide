@@ -1,4 +1,4 @@
-//! 测试 Anthropic API 集成
+//! 测试 Anthropic API 集成 (基于 rig-core)
 //!
 //! 运行方式:
 //! ```bash
@@ -8,7 +8,7 @@
 //! ```
 
 use oxide_core::types::{ContentBlock, Message, Role};
-use oxide_provider::{AnthropicProvider, LLMProvider};
+use oxide_provider::{RigAnthropicProvider, LLMProvider};
 use std::env;
 
 #[tokio::main]
@@ -22,12 +22,13 @@ async fn main() -> anyhow::Result<()> {
     let model = env::var("OXIDE_MODEL").ok();
 
     // 创建 Provider
-    let mut provider = AnthropicProvider::new(api_key, model);
-    if let Some(url) = base_url {
-        provider = provider.with_base_url(url);
-    }
+    let provider = if let Some(url) = base_url {
+        RigAnthropicProvider::with_base_url(api_key, url, model)
+    } else {
+        RigAnthropicProvider::new(api_key, model)
+    };
 
-    println!("🚀 测试 Anthropic API 集成\n");
+    println!("🚀 测试 Anthropic API 集成 (rig-core)\n");
 
     // 测试 1: 简单对话
     println!("📝 测试 1: 简单对话");

@@ -1,119 +1,72 @@
-//! 命令执行工具: Bash, TaskOutput, TaskStop
+//! 执行工具的 rig Tool trait 适配: Bash, TaskOutput, TaskStop
 
-use async_trait::async_trait;
-use serde::Deserialize;
-use serde_json::{json, Value};
-use std::collections::HashMap;
+use rig::completion::ToolDefinition;
+use rig::tool::Tool;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::RwLock;
 use tokio::time::timeout;
 
-use crate::registry::{Tool, ToolResult, ToolSchema};
+use super::{errors::ExecError, TaskManager};
+use crate::exec::BackgroundTask;
+
+// ============================================================================
+// Bash 工具
+// ============================================================================
 
 /// Bash 工具参数
 #[derive(Debug, Deserialize)]
-struct BashParams {
-    command: String,
+pub struct BashArgs {
+    /// 要执行的命令
+    pub command: String,
+    /// 命令描述（可选）
     #[serde(default)]
-    _description: Option<String>,
+    pub description: Option<String>,
+    /// 超时时间（毫秒）
     #[serde(default)]
-    timeout: Option<u64>,
+    pub timeout: Option<u64>,
+    /// 是否在后台运行
     #[serde(default)]
-    run_in_background: bool,
+    pub run_in_background: bool,
 }
 
-/// TaskOutput 工具参数
-#[derive(Debug, Deserialize)]
-struct TaskOutputParams {
-    task_id: String,
-    #[serde(default = "default_true")]
-    block: bool,
-    #[serde(default = "default_timeout")]
-    timeout: u64,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_timeout() -> u64 {
-    120000 // 2 分钟
-}
-
-/// TaskStop 工具参数
-#[derive(Debug, Deserialize)]
-struct TaskStopParams {
-    task_id: String,
-}
-
-/// 后台任务信息
-#[derive(Debug, Clone)]
-pub struct BackgroundTask {
-    pub _id: String,
-    pub _command: String,
+/// Bash 工具输出
+#[derive(Debug, Serialize)]
+pub struct BashOutput {
+    /// 命令输出
     pub output: String,
-    pub is_running: bool,
+    /// 退出码（前台执行时）
     pub exit_code: Option<i32>,
-}
-
-impl BackgroundTask {
-    /// 创建新的后台任务
-    pub fn new(id: String, command: String) -> Self {
-        Self {
-            _id: id,
-            _command: command,
-            output: String::new(),
-            is_running: true,
-            exit_code: None,
-        }
-    }
-}
-
-/// 后台任务管理器
-pub type TaskManager = Arc<RwLock<HashMap<String, BackgroundTask>>>;
-
-/// 创建新的任务管理器
-pub fn create_task_manager() -> TaskManager {
-    Arc::new(RwLock::new(HashMap::new()))
+    /// 任务 ID（后台执行时）
+    pub task_id: Option<String>,
+    /// 是否成功
+    pub success: bool,
 }
 
 /// Bash 工具 - 命令执行
-pub struct BashTool {
+#[derive(Clone)]
+pub struct RigBashTool {
     working_dir: PathBuf,
     task_manager: TaskManager,
 }
 
-impl BashTool {
-    pub fn new(working_dir: PathBuf) -> Self {
-        Self {
-            working_dir,
-            task_manager: create_task_manager(),
-        }
-    }
-
-    pub fn with_task_manager(working_dir: PathBuf, task_manager: TaskManager) -> Self {
+impl RigBashTool {
+    pub fn new(working_dir: PathBuf, task_manager: TaskManager) -> Self {
         Self {
             working_dir,
             task_manager,
         }
     }
 
-    /// 获取任务管理器（用于创建 TaskOutput 和 TaskStop 工具）
-    pub fn task_manager(&self) -> TaskManager {
-        self.task_manager.clone()
-    }
-
-    /// 执行命令（前台）
     async fn execute_foreground(
         &self,
         command: &str,
         timeout_ms: u64,
-    ) -> anyhow::Result<(String, i32)> {
+    ) -> Result<(String, i32), ExecError> {
         let mut cmd = Command::new("bash");
         cmd.arg("-c")
             .arg(command)
@@ -126,7 +79,6 @@ impl BashTool {
         let result = timeout(timeout_duration, async {
             let mut child = cmd.spawn()?;
 
-            // 读取 stdout 和 stderr
             let stdout = child.stdout.take().expect("Failed to capture stdout");
             let stderr = child.stderr.take().expect("Failed to capture stderr");
 
@@ -135,7 +87,6 @@ impl BashTool {
 
             let mut output = String::new();
 
-            // 交替读取 stdout 和 stderr
             loop {
                 tokio::select! {
                     line = stdout_reader.next_line() => {
@@ -145,7 +96,7 @@ impl BashTool {
                                 output.push('\n');
                             }
                             Ok(None) => break,
-                            Err(e) => return Err(anyhow::anyhow!("读取 stdout 失败: {}", e)),
+                            Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
                         }
                     }
                     line = stderr_reader.next_line() => {
@@ -155,7 +106,7 @@ impl BashTool {
                                 output.push('\n');
                             }
                             Ok(None) => {},
-                            Err(e) => return Err(anyhow::anyhow!("读取 stderr 失败: {}", e)),
+                            Err(_) => {},
                         }
                     }
                 }
@@ -164,19 +115,18 @@ impl BashTool {
             let status = child.wait().await?;
             let exit_code = status.code().unwrap_or(-1);
 
-            Ok::<(String, i32), anyhow::Error>((output, exit_code))
+            Ok::<(String, i32), std::io::Error>((output, exit_code))
         })
         .await;
 
         match result {
             Ok(Ok(output)) => Ok(output),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(anyhow::anyhow!("命令执行超时 ({}ms)", timeout_ms)),
+            Ok(Err(e)) => Err(ExecError::IoError(e)),
+            Err(_) => Err(ExecError::Timeout(timeout_ms)),
         }
     }
 
-    /// 执行命令（后台）
-    async fn execute_background(&self, command: &str) -> anyhow::Result<String> {
+    async fn execute_background(&self, command: &str) -> Result<String, ExecError> {
         let task_id = uuid::Uuid::new_v4().to_string();
 
         // 创建任务记录
@@ -246,7 +196,6 @@ impl BashTool {
                     let status = child.wait().await;
                     let exit_code = status.ok().and_then(|s| s.code());
 
-                    // 更新任务状态
                     let mut tasks = task_manager.write().await;
                     if let Some(task) = tasks.get_mut(&task_id_clone) {
                         task.output = output;
@@ -269,15 +218,16 @@ impl BashTool {
     }
 }
 
-#[async_trait]
-impl Tool for BashTool {
-    fn name(&self) -> &str {
-        "Bash"
-    }
+impl Tool for RigBashTool {
+    const NAME: &'static str = "Bash";
 
-    fn schema(&self) -> ToolSchema {
-        ToolSchema {
-            name: "Bash".to_string(),
+    type Error = ExecError;
+    type Args = BashArgs;
+    type Output = BashOutput;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
             description: "执行 bash 命令，支持前台和后台执行".to_string(),
             parameters: json!({
                 "type": "object",
@@ -304,62 +254,90 @@ impl Tool for BashTool {
         }
     }
 
-    async fn execute(&self, input: Value) -> anyhow::Result<ToolResult> {
-        let params: BashParams = serde_json::from_value(input)?;
-
-        if params.run_in_background {
-            // 后台执行
-            match self.execute_background(&params.command).await {
-                Ok(task_id) => Ok(ToolResult::success(format!(
-                    "✓ 后台任务已启动\n  任务 ID: {}\n  命令: {}\n\n使用 TaskOutput 工具查看输出",
-                    task_id, params.command
-                ))),
-                Err(e) => Ok(ToolResult::error(format!("启动后台任务失败: {}", e))),
-            }
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        if args.run_in_background {
+            let task_id = self.execute_background(&args.command).await?;
+            Ok(BashOutput {
+                output: format!("后台任务已启动，任务 ID: {}", task_id),
+                exit_code: None,
+                task_id: Some(task_id),
+                success: true,
+            })
         } else {
-            // 前台执行
-            let timeout_ms = params.timeout.unwrap_or(120000);
+            let timeout_ms = args.timeout.unwrap_or(120000);
+            let (output, exit_code) = self.execute_foreground(&args.command, timeout_ms).await?;
+            let success = exit_code == 0;
 
-            match self.execute_foreground(&params.command, timeout_ms).await {
-                Ok((output, exit_code)) => {
-                    let status = if exit_code == 0 { "✓" } else { "✗" };
-                    let output_preview = if output.len() > 5000 {
-                        format!("{}... (输出过长，已截断)", &output[..5000])
-                    } else {
-                        output
-                    };
-
-                    Ok(ToolResult::success(format!(
-                        "{} 命令执行完成 (退出码: {})\n命令: {}\n\n输出:\n{}",
-                        status, exit_code, params.command, output_preview
-                    )))
-                }
-                Err(e) => Ok(ToolResult::error(format!("命令执行失败: {}", e))),
-            }
+            Ok(BashOutput {
+                output,
+                exit_code: Some(exit_code),
+                task_id: None,
+                success,
+            })
         }
     }
 }
 
+// ============================================================================
+// TaskOutput 工具
+// ============================================================================
+
+/// TaskOutput 工具参数
+#[derive(Debug, Deserialize)]
+pub struct TaskOutputArgs {
+    /// 任务 ID
+    pub task_id: String,
+    /// 是否等待任务完成
+    #[serde(default = "default_true")]
+    pub block: bool,
+    /// 等待超时时间（毫秒）
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_timeout() -> u64 {
+    120000
+}
+
+/// TaskOutput 工具输出
+#[derive(Debug, Serialize)]
+pub struct TaskOutputOutput {
+    /// 任务输出
+    pub output: String,
+    /// 任务是否仍在运行
+    pub is_running: bool,
+    /// 退出码
+    pub exit_code: Option<i32>,
+    /// 是否成功
+    pub success: bool,
+}
+
 /// TaskOutput 工具 - 获取后台任务输出
-pub struct TaskOutputTool {
+#[derive(Clone)]
+pub struct RigTaskOutputTool {
     task_manager: TaskManager,
 }
 
-impl TaskOutputTool {
+impl RigTaskOutputTool {
     pub fn new(task_manager: TaskManager) -> Self {
         Self { task_manager }
     }
 }
 
-#[async_trait]
-impl Tool for TaskOutputTool {
-    fn name(&self) -> &str {
-        "TaskOutput"
-    }
+impl Tool for RigTaskOutputTool {
+    const NAME: &'static str = "TaskOutput";
 
-    fn schema(&self) -> ToolSchema {
-        ToolSchema {
-            name: "TaskOutput".to_string(),
+    type Error = ExecError;
+    type Args = TaskOutputArgs;
+    type Output = TaskOutputOutput;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
             description: "获取后台任务的输出".to_string(),
             parameters: json!({
                 "type": "object",
@@ -382,99 +360,98 @@ impl Tool for TaskOutputTool {
         }
     }
 
-    async fn execute(&self, input: Value) -> anyhow::Result<ToolResult> {
-        let params: TaskOutputParams = serde_json::from_value(input)?;
-
-        if params.block {
-            // 等待任务完成
-            let timeout_duration = Duration::from_millis(params.timeout);
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        if args.block {
+            let timeout_duration = Duration::from_millis(args.timeout);
             let start = std::time::Instant::now();
 
             loop {
                 let task = {
                     let tasks = self.task_manager.read().await;
-                    tasks.get(&params.task_id).cloned()
+                    tasks.get(&args.task_id).cloned()
                 };
 
                 match task {
                     Some(task) if !task.is_running => {
-                        let status = if task.exit_code == Some(0) {
-                            "✓ 成功"
-                        } else {
-                            "✗ 失败"
-                        };
-
-                        return Ok(ToolResult::success(format!(
-                            "任务完成: {}\n退出码: {:?}\n\n输出:\n{}",
-                            status,
-                            task.exit_code.unwrap_or(-1),
-                            task.output
-                        )));
+                        let success = task.exit_code == Some(0);
+                        return Ok(TaskOutputOutput {
+                            output: task.output,
+                            is_running: false,
+                            exit_code: task.exit_code,
+                            success,
+                        });
                     }
                     Some(_) => {
-                        // 任务仍在运行
                         if start.elapsed() > timeout_duration {
-                            return Ok(ToolResult::error("等待任务完成超时".to_string()));
+                            return Err(ExecError::WaitTimeout);
                         }
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                     None => {
-                        return Ok(ToolResult::error(format!(
-                            "任务不存在: {}",
-                            params.task_id
-                        )));
+                        return Err(ExecError::TaskNotFound(args.task_id));
                     }
                 }
             }
         } else {
-            // 立即返回当前状态
             let tasks = self.task_manager.read().await;
-            match tasks.get(&params.task_id) {
+            match tasks.get(&args.task_id) {
                 Some(task) => {
-                    let status = if task.is_running {
-                        "运行中"
-                    } else if task.exit_code == Some(0) {
-                        "✓ 成功"
-                    } else {
-                        "✗ 失败"
-                    };
-
-                    Ok(ToolResult::success(format!(
-                        "任务状态: {}\n退出码: {:?}\n\n当前输出:\n{}",
-                        status,
-                        task.exit_code.unwrap_or(-1),
-                        task.output
-                    )))
+                    let success = !task.is_running && task.exit_code == Some(0);
+                    Ok(TaskOutputOutput {
+                        output: task.output.clone(),
+                        is_running: task.is_running,
+                        exit_code: task.exit_code,
+                        success,
+                    })
                 }
-                None => Ok(ToolResult::error(format!(
-                    "任务不存在: {}",
-                    params.task_id
-                ))),
+                None => Err(ExecError::TaskNotFound(args.task_id)),
             }
         }
     }
 }
 
+// ============================================================================
+// TaskStop 工具
+// ============================================================================
+
+/// TaskStop 工具参数
+#[derive(Debug, Deserialize)]
+pub struct TaskStopArgs {
+    /// 任务 ID
+    pub task_id: String,
+}
+
+/// TaskStop 工具输出
+#[derive(Debug, Serialize)]
+pub struct TaskStopOutput {
+    /// 任务 ID
+    pub task_id: String,
+    /// 是否成功停止
+    pub stopped: bool,
+}
+
 /// TaskStop 工具 - 停止后台任务
-pub struct TaskStopTool {
+#[derive(Clone)]
+pub struct RigTaskStopTool {
     task_manager: TaskManager,
 }
 
-impl TaskStopTool {
+impl RigTaskStopTool {
     pub fn new(task_manager: TaskManager) -> Self {
         Self { task_manager }
     }
 }
 
-#[async_trait]
-impl Tool for TaskStopTool {
-    fn name(&self) -> &str {
-        "TaskStop"
-    }
+impl Tool for RigTaskStopTool {
+    const NAME: &'static str = "TaskStop";
 
-    fn schema(&self) -> ToolSchema {
-        ToolSchema {
-            name: "TaskStop".to_string(),
+    type Error = ExecError;
+    type Args = TaskStopArgs;
+    type Output = TaskStopOutput;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
             description: "停止后台任务".to_string(),
             parameters: json!({
                 "type": "object",
@@ -489,25 +466,19 @@ impl Tool for TaskStopTool {
         }
     }
 
-    async fn execute(&self, input: Value) -> anyhow::Result<ToolResult> {
-        let params: TaskStopParams = serde_json::from_value(input)?;
-
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let mut tasks = self.task_manager.write().await;
-        match tasks.get_mut(&params.task_id) {
+        match tasks.get_mut(&args.task_id) {
             Some(task) if task.is_running => {
-                // 注意：这里只是标记任务为停止，实际的进程终止需要更复杂的实现
                 task.is_running = false;
                 task.exit_code = Some(-1);
-                Ok(ToolResult::success(format!(
-                    "✓ 任务已标记为停止: {}",
-                    params.task_id
-                )))
+                Ok(TaskStopOutput {
+                    task_id: args.task_id,
+                    stopped: true,
+                })
             }
-            Some(_) => Ok(ToolResult::error("任务已经停止".to_string())),
-            None => Ok(ToolResult::error(format!(
-                "任务不存在: {}",
-                params.task_id
-            ))),
+            Some(_) => Err(ExecError::TaskAlreadyStopped),
+            None => Err(ExecError::TaskNotFound(args.task_id)),
         }
     }
 }
@@ -515,55 +486,62 @@ impl Tool for TaskStopTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rig_tools::create_task_manager;
     use tempfile::TempDir;
 
     #[tokio::test]
-    async fn test_bash_tool_simple_command() {
+    async fn test_rig_bash_tool_simple() {
         let temp_dir = TempDir::new().unwrap();
-        let tool = BashTool::new(temp_dir.path().to_path_buf());
+        let task_manager = create_task_manager();
+        let tool = RigBashTool::new(temp_dir.path().to_path_buf(), task_manager);
 
         let result = tool
-            .execute(json!({
-                "command": "echo 'Hello, World!'"
-            }))
+            .call(BashArgs {
+                command: "echo 'Hello, World!'".to_string(),
+                description: None,
+                timeout: None,
+                run_in_background: false,
+            })
             .await
             .unwrap();
 
-        assert!(!result.is_error);
-        assert!(result.content.contains("Hello, World!"));
+        assert!(result.success);
+        assert_eq!(result.exit_code, Some(0));
+        assert!(result.output.contains("Hello, World!"));
     }
 
     #[tokio::test]
-    async fn test_bash_tool_with_timeout() {
+    async fn test_rig_bash_tool_background() {
         let temp_dir = TempDir::new().unwrap();
-        let tool = BashTool::new(temp_dir.path().to_path_buf());
+        let task_manager = create_task_manager();
+        let tool = RigBashTool::new(temp_dir.path().to_path_buf(), task_manager.clone());
 
         let result = tool
-            .execute(json!({
-                "command": "sleep 5",
-                "timeout": 100
-            }))
+            .call(BashArgs {
+                command: "echo 'background'".to_string(),
+                description: None,
+                timeout: None,
+                run_in_background: true,
+            })
             .await
             .unwrap();
 
-        assert!(result.is_error);
-        assert!(result.content.contains("超时"));
-    }
+        assert!(result.task_id.is_some());
 
-    #[tokio::test]
-    async fn test_bash_tool_background() {
-        let temp_dir = TempDir::new().unwrap();
-        let tool = BashTool::new(temp_dir.path().to_path_buf());
+        // 等待任务完成
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
-        let result = tool
-            .execute(json!({
-                "command": "echo 'background task'",
-                "run_in_background": true
-            }))
+        let output_tool = RigTaskOutputTool::new(task_manager);
+        let output = output_tool
+            .call(TaskOutputArgs {
+                task_id: result.task_id.unwrap(),
+                block: false,
+                timeout: 1000,
+            })
             .await
             .unwrap();
 
-        assert!(!result.is_error);
-        assert!(result.content.contains("任务 ID"));
+        assert!(!output.is_running);
+        assert!(output.output.contains("background"));
     }
 }

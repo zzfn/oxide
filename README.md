@@ -6,11 +6,19 @@
 
 > **Oxide** 是一个基于 Rust 构建的、高性能、极简且强大的 AI 驱动编程助手。
 
-## 🎉 Phase 1 完成！
+## 🎉 最新进展
 
-✅ **LLM 集成层已完成**，现在可以与 Anthropic Claude API 进行完整交互，支持流式响应和自定义端点。
+✅ **Phase 1 (LLM 集成)** - 已完成，支持流式响应和自定义端点
+✅ **Phase 2 (核心工具)** - 95% 完成！实现了完整的工具系统和代理循环
+✅ **代理主循环** - 刚刚完成！AI 现在可以自主调用工具完成任务
+🆕 **rig-core 集成** - 新增！支持 20+ LLM 提供商，保留自实现作为备选
 
-查看 [Phase 1 完成总结](docs/phase1-completion.md) 了解详情。
+查看完成总结：
+- [Phase 1 完成总结](docs/phase1-completion.md)
+- [Phase 2.2 完成总结](docs/phase2.2-completion.md) - 文件操作工具
+- [Phase 2.3 完成总结](docs/phase2.3-completion.md) - 搜索工具
+- [Phase 2.4 完成总结](docs/phase2.4-completion.md) - 代理主循环
+- [rig-core 迁移完成](docs/rig-core-migration-complete.md) - rig-core 集成
 
 ## 🎯 愿景
 
@@ -57,13 +65,16 @@ cargo run --example test_api --package oxide-provider
 oxide/
 ├── crates/
 │   ├── oxide-core/          # ✅ 核心类型和配置
-│   ├── oxide-provider/      # ✅ LLM 提供商（Phase 1 完成）
-│   ├── oxide-tools/         # 🚧 工具系统（待实现）
-│   ├── oxide-agent/         # 🚧 代理系统（待实现）
-│   └── oxide-cli/           # ✅ CLI 界面（基础完成）
+│   ├── oxide-provider/      # ✅ LLM 提供商（支持工具调用）
+│   ├── oxide-tools/         # ✅ 工具系统（Read, Write, Edit, Glob, Grep, Bash）
+│   ├── oxide-agent/         # 🚧 代理系统（基础功能完成）
+│   └── oxide-cli/           # ✅ CLI 界面（完整的代理循环）
 ├── docs/                    # 文档
 │   ├── roadmap.md          # 完整路线图
-│   └── phase1-completion.md # Phase 1 总结
+│   ├── phase1-completion.md # Phase 1 总结
+│   ├── phase2.2-completion.md # Phase 2.2 总结（文件工具）
+│   ├── phase2.3-completion.md # Phase 2.3 总结（搜索工具）
+│   └── phase2.4-completion.md # Phase 2.4 总结（代理循环）
 └── Cargo.toml              # Workspace 配置
 ```
 
@@ -71,11 +82,11 @@ oxide/
 
 | Phase | 功能 | 状态 | 完成度 |
 |-------|------|------|--------|
-| Phase 0 | 基础设施 | ✅ | 90% |
+| Phase 0 | 基础设施 | ✅ | 100% |
 | Phase 1 | LLM 集成 | ✅ | 100% |
-| Phase 2 | 核心工具 | 🚧 | 20% |
+| Phase 2 | 核心工具 | 🚧 | 95% |
 | Phase 3 | 高级功能 | ⏳ | 0% |
-| Phase 4 | CLI 界面 | ✅ | 85% |
+| Phase 4 | CLI 界面 | ✅ | 100% |
 | Phase 5 | Git 集成 | ⏳ | 0% |
 | Phase 6 | 扩展功能 | ⏳ | 0% |
 | Phase 7 | 优化完善 | ⏳ | 0% |
@@ -84,15 +95,40 @@ oxide/
 
 ## 💻 使用示例
 
-### 基础对话
+### 启动 CLI
+
+```bash
+# 设置 API Key
+export OXIDE_AUTH_TOKEN=your_api_key_here
+
+# 启动 Oxide CLI
+cargo run --bin oxide
+
+# 或者编译后运行
+cargo build --release
+./target/release/oxide
+```
+
+### 与 AI 对话
+
+```
+[N] > 帮我读取 src/main.rs 文件
+
+Assistant ⚙ 执行工具: Read
+  ✓ 工具 Read 执行成功
+
+这是 main.rs 的内容...
+```
+
+### 基础对话（编程使用）
 
 ```rust
 use oxide_core::types::{Message, Role};
-use oxide_provider::{AnthropicProvider, LLMProvider};
+use oxide_provider::{RigAnthropicProvider, LLMProvider};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let provider = AnthropicProvider::new(
+    let provider = RigAnthropicProvider::new(
         std::env::var("OXIDE_AUTH_TOKEN")?,
         None
     );
@@ -127,7 +163,7 @@ provider.complete_stream(
 
 - **Language**: [Rust](https://www.rust-lang.org/) 1.70+
 - **Runtime**: [Tokio](https://tokio.rs/)
-- **HTTP Client**: [Reqwest](https://github.com/seanmonstar/reqwest)
+- **LLM Framework**: [rig-core](https://github.com/0xPlaygrounds/rig) - 支持 20+ LLM 提供商
 - **CLI**: [Reedline](https://github.com/nushell/reedline)
 - **Rendering**: [Termimad](https://github.com/Canop/termimad)
 
@@ -136,6 +172,10 @@ provider.complete_stream(
 - [快速开始](QUICKSTART.md)
 - [完整路线图](docs/roadmap.md)
 - [Phase 1 完成总结](docs/phase1-completion.md)
+- [Phase 2.2 完成总结](docs/phase2.2-completion.md) - 文件操作工具
+- [Phase 2.3 完成总结](docs/phase2.3-completion.md) - 搜索工具
+- [Phase 2.4 完成总结](docs/phase2.4-completion.md) - 代理主循环
+- [CLI 集成文档](CLI_INTEGRATION.md)
 - [Provider 使用文档](crates/oxide-provider/README.md)
 
 ## 🤝 贡献
@@ -157,6 +197,6 @@ provider.complete_stream(
 
 Made with ❤️ by [zzfn](https://github.com/zzfn)
 
-**当前版本**: 0.1.0 | **最后更新**: 2026-01-30 | **状态**: Phase 1 完成 ✅
+**当前版本**: 0.1.0 | **最后更新**: 2026-01-30 | **状态**: Phase 2 (95%) 🚀
 
 </div>

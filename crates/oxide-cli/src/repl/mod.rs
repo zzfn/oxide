@@ -139,14 +139,14 @@ impl Repl {
             state.start_processing();
         }
 
-        // 检查是否有 Provider
-        let provider = {
+        // 检查是否有 Rig Provider
+        let rig_provider = {
             let state = self.state.read().await;
-            state.provider.clone()
+            state.rig_provider.clone()
         };
 
-        let Some(provider) = provider else {
-            self.renderer.error("AI Provider 未初始化。请设置 OXIDE_AUTH_TOKEN 或 ANTHROPIC_API_KEY 环境变量。");
+        let Some(provider) = rig_provider else {
+            self.renderer.error("AI Provider 未初始化。请设置 ANTHROPIC_API_KEY 环境变量。");
             let mut state = self.state.write().await;
             state.end_processing();
             return Ok(());
@@ -161,43 +161,39 @@ impl Repl {
             ));
         }
 
-        // 获取会话消息
-        let messages = {
+        // 获取会话历史和工作目录
+        let (chat_history, working_dir) = {
             let state = self.state.read().await;
-            state.conversation.messages.clone()
+            (state.conversation.messages.clone(), state.working_dir.clone())
         };
 
-        // 调用 AI（流式响应）
+        // 创建 Agent Runner
+        let agent_runner = crate::agent::RigAgentRunner::new(working_dir);
+
+        // 显示助手响应头部
         self.renderer.assistant_header();
 
-        match provider
-            .complete_stream(
-                &messages,
-                Box::new(|block| {
-                    if let oxide_core::types::ContentBlock::Text { text } = block {
-                        print!("{}", text);
-                        use std::io::Write;
-                        std::io::stdout().flush().unwrap();
-                    }
-                }),
-            )
-            .await
-        {
+        // 运行代理
+        match agent_runner.run(&provider, input, chat_history).await {
             Ok(response) => {
-                println!(); // 换行
+                // 显示响应
+                println!("{}", response);
 
-                // 添加 AI 响应到会话
+                // 更新会话历史
                 {
                     let mut state = self.state.write().await;
-                    state.conversation.add_message(response);
+                    state.conversation.add_message(oxide_core::types::Message::text(
+                        oxide_core::types::Role::Assistant,
+                        &response,
+                    ));
                     // TODO: 从 API 响应中获取实际的 token 使用量
-                    state.update_token_usage(input.len() as u64, 100, 0);
+                    state.update_token_usage(input.len() as u64, response.len() as u64, 0);
                     state.end_processing();
                 }
             }
             Err(e) => {
                 println!(); // 换行
-                self.renderer.error(&format!("AI 请求失败: {}", e));
+                self.renderer.error(&format!("代理执行失败: {}", e));
 
                 // 移除失败的用户消息
                 {

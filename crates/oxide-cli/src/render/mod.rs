@@ -94,6 +94,21 @@ impl Renderer {
     pub fn markdown_renderer(&self) -> &MarkdownRenderer {
         &self.markdown
     }
+
+    /// 显示工具执行开始
+    pub fn tool_execution(&self, tool_name: &str) {
+        println!("  {} 执行工具: {}", "⚙".bright_yellow(), tool_name.bright_cyan());
+    }
+
+    /// 显示工具执行成功
+    pub fn tool_success(&self, tool_name: &str) {
+        println!("  {} 工具 {} 执行成功", "✓".green(), tool_name.bright_cyan());
+    }
+
+    /// 显示工具执行错误
+    pub fn tool_error(&self, tool_name: &str, error: &str) {
+        println!("  {} 工具 {} 执行失败: {}", "✗".red(), tool_name.bright_cyan(), error);
+    }
 }
 
 impl Default for Renderer {

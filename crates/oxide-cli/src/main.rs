@@ -5,8 +5,8 @@
 use anyhow::Result;
 use clap::Parser;
 use oxide_core::Env;
-use oxide_provider::{AnthropicProvider, LLMProvider};
-use std::sync::Arc;
+use oxide_provider::RigAnthropicProvider;
+use std::path::PathBuf;
 
 use oxide_cli::{commands, create_shared_state, repl::Repl};
 
@@ -35,9 +35,17 @@ async fn main() -> Result<()> {
     // 创建共享状态
     let state = create_shared_state();
 
+    // 初始化工作目录
+    let working_dir = args.dir.clone().map(PathBuf::from).unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    });
+
     // 初始化 LLM Provider
     {
         let mut state = state.write().await;
+
+        // 设置工作目录
+        state.working_dir = working_dir;
 
         // 从环境变量获取配置
         match Env::api_key() {
@@ -45,17 +53,19 @@ async fn main() -> Result<()> {
                 let base_url = Env::base_url();
                 let model = Env::model_override();
 
-                let mut provider = AnthropicProvider::new(api_key, model);
-                if let Some(url) = base_url {
-                    provider = provider.with_base_url(url);
-                }
+                let provider = if let Some(url) = base_url {
+                    RigAnthropicProvider::with_base_url(api_key, url, model)
+                } else {
+                    RigAnthropicProvider::new(api_key, model)
+                };
 
-                state.set_provider(Arc::new(provider) as Arc<dyn LLMProvider>);
-                eprintln!("✅ LLM Provider 已初始化");
+                // 使用新的 rig provider
+                state.set_rig_provider(provider);
+                eprintln!("✅ LLM Provider 已初始化 (rig-core)");
             }
             Err(e) => {
                 eprintln!("⚠️  警告: {}", e);
-                eprintln!("   AI 功能将不可用。请设置 OXIDE_AUTH_TOKEN 或 ANTHROPIC_API_KEY 环境变量。");
+                eprintln!("   AI 功能将不可用。请设置 ANTHROPIC_API_KEY 环境变量。");
             }
         }
 
@@ -64,11 +74,6 @@ async fn main() -> Result<()> {
             "fast" | "f" => state.set_mode(oxide_cli::CliMode::Fast),
             "plan" | "p" => state.set_mode(oxide_cli::CliMode::Plan),
             _ => {} // 默认 Normal
-        }
-
-        // 设置工作目录
-        if let Some(dir) = args.dir {
-            state.working_dir = std::path::PathBuf::from(dir);
         }
     }
 
