@@ -3,9 +3,10 @@
 //! 使用 rig Agent 处理工具调用循环，替代自实现的代理循环。
 
 use anyhow::Result;
+use oxide_core::config::PermissionsConfig;
 use oxide_core::types::{ContentBlock, Message, Role};
 use oxide_provider::RigAnthropicProvider;
-use oxide_tools::TaskManager;
+use oxide_tools::{PermissionManager, TaskManager};
 use rig::completion::Prompt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,12 +14,44 @@ use std::sync::Arc;
 use crate::interaction::CliInteractionHandler;
 use crate::render::Renderer;
 
+/// 创建 CLI 确认回调
+fn create_confirmation_callback() -> oxide_tools::ConfirmationCallback {
+    Arc::new(|tool_name: String| {
+        Box::pin(async move {
+            use dialoguer::{theme::ColorfulTheme, Confirm};
+
+            let theme = ColorfulTheme::default();
+            let prompt = format!(
+                "工具 '{}' 是危险操作，是否允许执行？",
+                tool_name
+            );
+
+            match Confirm::with_theme(&theme)
+                .with_prompt(&prompt)
+                .default(true)
+                .interact()
+            {
+                Ok(confirmed) => confirmed,
+                Err(_) => false, // 出错时默认拒绝
+            }
+        })
+    })
+}
+
+/// 创建权限管理器
+fn create_permission_manager() -> PermissionManager {
+    PermissionManager::new(PermissionsConfig::default())
+        .with_confirmation_callback(create_confirmation_callback())
+}
+
 /// 基于 rig 的代理
 pub struct RigAgentRunner {
     /// 工作目录
     working_dir: PathBuf,
     /// 任务管理器（用于后台任务）
     task_manager: TaskManager,
+    /// 权限管理器
+    permission_manager: PermissionManager,
     /// 系统提示词
     system_prompt: Option<String>,
 }
@@ -29,6 +62,7 @@ impl RigAgentRunner {
         Self {
             working_dir,
             task_manager: oxide_tools::rig_tools::create_task_manager(),
+            permission_manager: create_permission_manager(),
             system_prompt: None,
         }
     }
@@ -42,6 +76,12 @@ impl RigAgentRunner {
     /// 设置任务管理器
     pub fn with_task_manager(mut self, task_manager: TaskManager) -> Self {
         self.task_manager = task_manager;
+        self
+    }
+
+    /// 设置权限管理器
+    pub fn with_permission_manager(mut self, permission_manager: PermissionManager) -> Self {
+        self.permission_manager = permission_manager;
         self
     }
 
@@ -62,6 +102,7 @@ impl RigAgentRunner {
         // 创建工具列表（boxed）
         let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
             .task_manager(self.task_manager.clone())
+            .permission_manager(self.permission_manager.clone())
             .build_boxed();
 
         // 添加交互工具并设置处理器
@@ -107,6 +148,7 @@ impl RigAgentRunner {
         // 创建工具列表（boxed）
         let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
             .task_manager(self.task_manager.clone())
+            .permission_manager(self.permission_manager.clone())
             .build_boxed();
 
         // 添加交互工具并设置处理器

@@ -1,5 +1,6 @@
 //! rig 工具适配的错误类型定义
 
+use std::fmt;
 use thiserror::Error;
 
 /// 文件操作错误
@@ -82,4 +83,50 @@ pub enum RigToolError {
 
     #[error("序列化错误: {0}")]
     SerializationError(#[from] serde_json::Error),
+}
+
+/// 权限错误
+#[derive(Debug, Error)]
+pub enum PermissionError {
+    #[error("工具 '{0}' 被权限配置禁止执行")]
+    ToolDenied(String),
+
+    #[error("工具 '{0}' 需要用户确认，但用户拒绝执行")]
+    UserRejected(String),
+
+    #[error("工具 '{0}' 需要用户确认，但未配置确认处理器")]
+    NoConfirmationHandler(String),
+}
+
+/// 包装错误 - 用于 ToolWrapper，可以包含权限错误或内部工具错误
+#[derive(Debug)]
+pub enum WrappedError<E> {
+    /// 权限错误
+    Permission(PermissionError),
+    /// 内部工具错误
+    Inner(E),
+}
+
+impl<E: fmt::Display> fmt::Display for WrappedError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WrappedError::Permission(e) => write!(f, "{}", e),
+            WrappedError::Inner(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for WrappedError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            WrappedError::Permission(e) => Some(e),
+            WrappedError::Inner(e) => Some(e),
+        }
+    }
+}
+
+impl<E> From<PermissionError> for WrappedError<E> {
+    fn from(e: PermissionError) -> Self {
+        WrappedError::Permission(e)
+    }
 }

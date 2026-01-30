@@ -25,7 +25,7 @@ pub mod web;
 pub use exec::{BashTool, TaskOutputTool, TaskStopTool};
 pub use file::{EditTool, ReadTool, WriteTool};
 pub use interaction::{AskUserQuestionTool, QuestionOption, QuestionType};
-pub use permission::PermissionManager;
+pub use permission::{ConfirmationCallback, PermissionManager};
 pub use plan::{PlanManager, RigEnterPlanModeTool, RigExitPlanModeTool};
 pub use registry::{Tool, ToolRegistry, ToolResult, ToolSchema};
 pub use search::{GlobTool, GrepTool};
