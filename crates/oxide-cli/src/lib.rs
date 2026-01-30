@@ -5,6 +5,7 @@
 pub mod agent;
 pub mod app;
 pub mod commands;
+pub mod interaction;
 pub mod render;
 pub mod repl;
 pub mod statusbar;

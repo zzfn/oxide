@@ -12,6 +12,7 @@
 
 pub mod exec;
 pub mod file;
+pub mod interaction;
 pub mod registry;
 pub mod rig_tools;
 pub mod search;
@@ -21,6 +22,7 @@ pub mod web;
 // 重新导出常用类型
 pub use exec::{BashTool, TaskOutputTool, TaskStopTool};
 pub use file::{EditTool, ReadTool, WriteTool};
+pub use interaction::{AskUserQuestionTool, QuestionOption, QuestionType};
 pub use registry::{Tool, ToolRegistry, ToolResult, ToolSchema};
 pub use search::{GlobTool, GrepTool};
 pub use task::{Task, TaskError, TaskManager, TaskStatus};

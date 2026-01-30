@@ -164,7 +164,7 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 - [ ] 任务持久化
 
 #### 3.4 用户交互
-- [ ] **AskUserQuestion**: 询问用户
+- [x] **AskUserQuestion**: 询问用户
   - 单选/多选支持
   - 选项推荐
   - 自定义输入

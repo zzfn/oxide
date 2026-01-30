@@ -61,3 +61,25 @@ pub enum ExecError {
     #[error("IO 错误: {0}")]
     IoError(#[from] std::io::Error),
 }
+
+/// 通用工具错误
+#[derive(Debug, Error)]
+pub enum RigToolError {
+    #[error("参数解析失败: {0}")]
+    InvalidArgs(String),
+
+    #[error("执行失败: {0}")]
+    ExecutionError(String),
+
+    #[error("文件错误: {0}")]
+    FileError(#[from] FileError),
+
+    #[error("搜索错误: {0}")]
+    SearchError(#[from] SearchError),
+
+    #[error("执行错误: {0}")]
+    ExecError(#[from] ExecError),
+
+    #[error("序列化错误: {0}")]
+    SerializationError(#[from] serde_json::Error),
+}

@@ -6,12 +6,14 @@
 pub mod errors;
 pub mod exec;
 pub mod file;
+pub mod interaction;
 pub mod search;
 pub mod wrapper;
 
 pub use errors::*;
 pub use exec::*;
 pub use file::*;
+pub use interaction::*;
 pub use search::*;
 pub use wrapper::ToolWrapper;
 
@@ -38,6 +40,7 @@ pub struct OxideToolSetBuilder {
     include_file: bool,
     include_exec: bool,
     include_task: bool,
+    include_interaction: bool,
 }
 
 impl OxideToolSetBuilder {
@@ -50,6 +53,7 @@ impl OxideToolSetBuilder {
             include_file: true,
             include_exec: true,
             include_task: true,
+            include_interaction: true,
         }
     }
 
@@ -80,6 +84,12 @@ impl OxideToolSetBuilder {
     /// 是否包含任务管理工具 (TaskCreate, TaskList, TaskGet, TaskUpdate)
     pub fn task_tools(mut self, include: bool) -> Self {
         self.include_task = include;
+        self
+    }
+
+    /// 是否包含交互工具 (AskUserQuestion)
+    pub fn interaction_tools(mut self, include: bool) -> Self {
+        self.include_interaction = include;
         self
     }
 
@@ -117,6 +127,11 @@ impl OxideToolSetBuilder {
             toolset.add_tool(RigTaskUpdateTool::new(task_manager.clone()));
         }
 
+        // 添加交互工具
+        if self.include_interaction {
+            toolset.add_tool(RigAskUserQuestionTool::new());
+        }
+
         toolset
     }
 
@@ -148,6 +163,10 @@ impl OxideToolSetBuilder {
             tools.push(Box::new(ToolWrapper::new(RigTaskListTool::new(task_manager.clone()))));
             tools.push(Box::new(ToolWrapper::new(RigTaskGetTool::new(task_manager.clone()))));
             tools.push(Box::new(ToolWrapper::new(RigTaskUpdateTool::new(task_manager.clone()))));
+        }
+
+        if self.include_interaction {
+            tools.push(Box::new(ToolWrapper::new(RigAskUserQuestionTool::new())));
         }
 
         tools

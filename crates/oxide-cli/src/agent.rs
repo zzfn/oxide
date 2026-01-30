@@ -10,6 +10,7 @@ use rig::completion::Prompt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::interaction::CliInteractionHandler;
 use crate::render::Renderer;
 
 /// 基于 rig 的代理
@@ -62,9 +63,14 @@ impl RigAgentRunner {
         chat_history: Vec<Message>,
     ) -> Result<String> {
         // 创建工具列表（boxed）
-        let tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
+        let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
             .task_manager(self.task_manager.clone())
             .build_boxed();
+
+        // 添加交互工具并设置处理器
+        let ask_tool = oxide_tools::rig_tools::RigAskUserQuestionTool::new();
+        ask_tool.set_handler(Arc::new(CliInteractionHandler::new())).await;
+        tools.push(Box::new(oxide_tools::rig_tools::ToolWrapper::new(ask_tool)));
 
         // 创建 rig Agent
         let agent = provider.create_agent_with_tools(
@@ -102,9 +108,14 @@ impl RigAgentRunner {
         use futures::StreamExt;
 
         // 创建工具列表（boxed）
-        let tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
+        let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
             .task_manager(self.task_manager.clone())
             .build_boxed();
+
+        // 添加交互工具并设置处理器
+        let ask_tool = oxide_tools::rig_tools::RigAskUserQuestionTool::new();
+        ask_tool.set_handler(Arc::new(CliInteractionHandler::new())).await;
+        tools.push(Box::new(oxide_tools::rig_tools::ToolWrapper::new(ask_tool)));
 
         // 创建 rig Agent
         let agent = provider.create_agent_with_tools(
