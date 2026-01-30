@@ -7,6 +7,7 @@ pub mod errors;
 pub mod exec;
 pub mod file;
 pub mod interaction;
+pub mod plan;
 pub mod search;
 pub mod wrapper;
 
@@ -14,6 +15,7 @@ pub use errors::*;
 pub use exec::*;
 pub use file::*;
 pub use interaction::*;
+pub use plan::*;
 pub use search::*;
 pub use wrapper::ToolWrapper;
 
@@ -36,11 +38,13 @@ pub fn create_task_manager() -> TaskManager {
 pub struct OxideToolSetBuilder {
     working_dir: PathBuf,
     task_manager: Option<TaskManager>,
+    plan_manager: Option<PlanManager>,
     include_search: bool,
     include_file: bool,
     include_exec: bool,
     include_task: bool,
     include_interaction: bool,
+    include_plan: bool,
 }
 
 impl OxideToolSetBuilder {
@@ -49,17 +53,25 @@ impl OxideToolSetBuilder {
         Self {
             working_dir,
             task_manager: None,
+            plan_manager: None,
             include_search: true,
             include_file: true,
             include_exec: true,
             include_task: true,
             include_interaction: true,
+            include_plan: true,
         }
     }
 
     /// 设置任务管理器（用于后台任务）
     pub fn task_manager(mut self, manager: TaskManager) -> Self {
         self.task_manager = Some(manager);
+        self
+    }
+
+    /// 设置计划管理器（用于计划模式）
+    pub fn plan_manager(mut self, manager: PlanManager) -> Self {
+        self.plan_manager = Some(manager);
         self
     }
 
@@ -93,10 +105,17 @@ impl OxideToolSetBuilder {
         self
     }
 
+    /// 是否包含计划模式工具 (EnterPlanMode, ExitPlanMode)
+    pub fn plan_tools(mut self, include: bool) -> Self {
+        self.include_plan = include;
+        self
+    }
+
     /// 构建 ToolSet
     pub fn build(self) -> ToolSet {
         let mut toolset = ToolSet::default();
         let task_manager = self.task_manager.unwrap_or_else(create_task_manager);
+        let plan_manager = self.plan_manager.unwrap_or_else(PlanManager::new);
 
         // 添加搜索工具
         if self.include_search {
@@ -132,6 +151,12 @@ impl OxideToolSetBuilder {
             toolset.add_tool(RigAskUserQuestionTool::new());
         }
 
+        // 添加计划模式工具
+        if self.include_plan {
+            toolset.add_tool(RigEnterPlanModeTool::new(plan_manager.clone()));
+            toolset.add_tool(RigExitPlanModeTool::new(plan_manager.clone()));
+        }
+
         toolset
     }
 
@@ -139,6 +164,7 @@ impl OxideToolSetBuilder {
     pub fn build_boxed(self) -> Vec<Box<dyn ToolDyn>> {
         let mut tools: Vec<Box<dyn ToolDyn>> = Vec::new();
         let task_manager = self.task_manager.unwrap_or_else(create_task_manager);
+        let plan_manager = self.plan_manager.unwrap_or_else(PlanManager::new);
 
         if self.include_search {
             tools.push(Box::new(ToolWrapper::new(RigGlobTool::new(self.working_dir.clone()))));
@@ -167,6 +193,11 @@ impl OxideToolSetBuilder {
 
         if self.include_interaction {
             tools.push(Box::new(ToolWrapper::new(RigAskUserQuestionTool::new())));
+        }
+
+        if self.include_plan {
+            tools.push(Box::new(ToolWrapper::new(RigEnterPlanModeTool::new(plan_manager.clone()))));
+            tools.push(Box::new(ToolWrapper::new(RigExitPlanModeTool::new(plan_manager.clone()))));
         }
 
         tools

@@ -149,9 +149,9 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 - [ ] 代理恢复机制 (resume)
 
 #### 3.2 计划模式 (Plan Mode)
-- [ ] **EnterPlanMode**: 进入计划模式
-- [ ] **ExitPlanMode**: 退出并请求批准
-- [ ] 计划文件管理
+- [x] **EnterPlanMode**: 进入计划模式
+- [x] **ExitPlanMode**: 退出并请求批准
+- [x] 计划文件管理
 - [ ] 权限请求系统
 
 #### 3.3 任务管理系统
@@ -500,10 +500,11 @@ oxide/
   - 代理主循环已完成（工具调用、流式输出）
   - 待完成: 网页获取 (WebFetch)
 
-- **Phase 3 (高级功能)**: 20% 完成
+- **Phase 3 (高级功能)**: 35% 完成
   - 任务管理系统已完成 (TaskCreate, TaskList, TaskGet, TaskUpdate)
   - 任务依赖关系管理和循环依赖检测已完成
-  - 待完成: 子代理系统、计划模式、用户交互工具
+  - 计划模式已完成 (EnterPlanMode, ExitPlanMode)
+  - 待完成: 子代理系统、用户交互工具 (AskUserQuestion)、权限请求系统
 
 ### ⏳ 未开始
 - **Phase 3 (高级功能 - 剩余部分)**: 子代理系统、计划模式、用户交互
@@ -518,9 +519,9 @@ oxide/
 4. ✅ ~~实现搜索工具 (Glob, Grep)~~
 5. ✅ ~~完成代理主循环，实现工具调用~~
 6. ✅ ~~实现任务管理系统 (TaskCreate, TaskList, TaskGet, TaskUpdate)~~
-7. 实现子代理系统 (Task Tool)
-8. 实现计划模式 (EnterPlanMode, ExitPlanMode)
-9. 实现用户交互工具 (AskUserQuestion)
+7. ✅ ~~实现计划模式 (EnterPlanMode, ExitPlanMode)~~
+8. 完善用户交互工具 (AskUserQuestion) - 已有基础实现
+9. 实现子代理系统 (Task Tool)
 10. 实现网页获取工具 (WebFetch)
 11. 端到端测试和优化
 
