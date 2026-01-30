@@ -1,7 +1,7 @@
 //! 计划模式工具
 
 use oxide_core::error::OxideError;
-use oxide_core::session::Plan;
+use oxide_core::session::{AllowedPrompt, Plan};
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,13 @@ impl Tool for RigEnterPlanModeTool {
     }
 }
 
+/// 权限提示参数
+#[derive(Debug, Deserialize)]
+pub struct AllowedPromptArg {
+    pub tool: String,
+    pub prompt: String,
+}
+
 /// ExitPlanMode 工具参数
 #[derive(Debug, Deserialize)]
 pub struct ExitPlanModeArgs {
@@ -72,6 +79,9 @@ pub struct ExitPlanModeArgs {
     pub plan_content: String,
     /// 计划标题（可选）
     pub plan_title: Option<String>,
+    /// 实现计划所需的权限
+    #[serde(default, rename = "allowedPrompts")]
+    pub allowed_prompts: Option<Vec<AllowedPromptArg>>,
 }
 
 /// ExitPlanMode 工具输出
@@ -115,6 +125,25 @@ impl Tool for RigExitPlanModeTool {
                     "plan_title": {
                         "type": "string",
                         "description": "计划标题（可选）"
+                    },
+                    "allowedPrompts": {
+                        "type": "array",
+                        "description": "实现计划所需的权限列表（可选）",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tool": {
+                                    "type": "string",
+                                    "description": "工具名称（如 Bash）",
+                                    "enum": ["Bash"]
+                                },
+                                "prompt": {
+                                    "type": "string",
+                                    "description": "权限描述（如 'run tests', 'install dependencies'）"
+                                }
+                            },
+                            "required": ["tool", "prompt"]
+                        }
                     }
                 },
                 "required": ["plan_content"]
@@ -133,7 +162,22 @@ impl Tool for RigExitPlanModeTool {
         let title = args
             .plan_title
             .unwrap_or_else(|| format!("Plan {}", plan_id));
-        let plan = Plan::new(title.clone(), args.plan_content, plan_id);
+
+        let allowed_prompts = args
+            .allowed_prompts
+            .map(|prompts| {
+                prompts
+                    .into_iter()
+                    .map(|p| AllowedPrompt {
+                        tool: p.tool,
+                        prompt: p.prompt,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let plan = Plan::new(title.clone(), args.plan_content, plan_id)
+            .with_allowed_prompts(allowed_prompts);
 
         // 保存计划
         plan.save().map_err(|e| {
@@ -145,13 +189,22 @@ impl Tool for RigExitPlanModeTool {
 
         let plan_path = format!("~/.oxide/plans/{}.json", plan_id);
 
+        let mut message = format!(
+            "计划已保存: {}\n\n计划标题: {}\n计划 ID: {}",
+            plan_path, title, plan_id
+        );
+
+        if !plan.allowed_prompts.is_empty() {
+            message.push_str("\n\n请求的权限:");
+            for prompt in &plan.allowed_prompts {
+                message.push_str(&format!("\n  - {} ({})", prompt.prompt, prompt.tool));
+            }
+        }
+
         Ok(ExitPlanModeOutput {
             plan_id: plan_id.to_string(),
             plan_path: plan_path.clone(),
-            message: format!(
-                "计划已保存: {}\n\n计划标题: {}\n计划 ID: {}",
-                plan_path, title, plan_id
-            ),
+            message,
         })
     }
 }

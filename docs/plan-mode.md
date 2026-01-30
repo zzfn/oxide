@@ -51,11 +51,24 @@ EnterPlanMode {}
 ```rust
 ExitPlanMode {
     plan_content: "# 实现计划\n\n## 文件修改清单\n...",
-    plan_title: "添加用户认证功能"
+    plan_title: "添加用户认证功能",
+    allowed_prompts: [
+        { tool: "Bash", prompt: "run tests" },
+        { tool: "Bash", prompt: "install dependencies" }
+    ]
 }
 ```
 
 计划将保存到 `~/.oxide/plans/{plan_id}.json`。
+
+#### 权限请求系统
+
+`allowedPrompts` 参数允许代理声明实现计划所需的权限：
+
+- **tool**: 工具名称（目前支持 "Bash"）
+- **prompt**: 权限描述（如 "run tests", "install dependencies"）
+
+这些权限将保存在计划文件中，供用户审查和批准。
 
 ## 计划文件格式
 
@@ -170,13 +183,14 @@ let tools = OxideToolSetBuilder::new(working_dir)
 当前实现的限制：
 
 - 计划模式不会自动限制工具使用（需要代理自觉遵守）
-- 没有实现权限请求系统
+- 权限系统仅支持声明，不强制执行
 - 计划文件目前只是简单的 JSON 存储
 
 ## 未来改进
 
 - [ ] 自动限制计划模式下的工具使用（禁用 Write, Edit 等修改工具）
-- [ ] 实现权限请求系统（allowedPrompts）
+- [ ] 实现权限强制执行机制
 - [ ] 支持计划的版本管理和比较
 - [ ] 提供计划模板
 - [ ] 集成到 CLI 命令（如 `/plan`）
+- [ ] 扩展权限系统支持更多工具类型

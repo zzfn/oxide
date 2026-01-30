@@ -19,9 +19,10 @@ pub use plan::*;
 pub use search::*;
 pub use wrapper::ToolWrapper;
 
-use rig::tool::{ToolDyn, ToolSet};
+use rig::tool::{Tool, ToolDyn, ToolSet};
 use std::path::PathBuf;
 
+use crate::permission::PermissionManager;
 use crate::task::TaskManager;
 
 // 重新导出 TaskManager
@@ -39,6 +40,7 @@ pub struct OxideToolSetBuilder {
     working_dir: PathBuf,
     task_manager: Option<TaskManager>,
     plan_manager: Option<PlanManager>,
+    permission_manager: Option<PermissionManager>,
     include_search: bool,
     include_file: bool,
     include_exec: bool,
@@ -54,6 +56,7 @@ impl OxideToolSetBuilder {
             working_dir,
             task_manager: None,
             plan_manager: None,
+            permission_manager: None,
             include_search: true,
             include_file: true,
             include_exec: true,
@@ -72,6 +75,12 @@ impl OxideToolSetBuilder {
     /// 设置计划管理器（用于计划模式）
     pub fn plan_manager(mut self, manager: PlanManager) -> Self {
         self.plan_manager = Some(manager);
+        self
+    }
+
+    /// 设置权限管理器（用于工具权限控制）
+    pub fn permission_manager(mut self, manager: PermissionManager) -> Self {
+        self.permission_manager = Some(manager);
         self
     }
 
@@ -165,42 +174,52 @@ impl OxideToolSetBuilder {
         let mut tools: Vec<Box<dyn ToolDyn>> = Vec::new();
         let task_manager = self.task_manager.unwrap_or_else(create_task_manager);
         let plan_manager = self.plan_manager.unwrap_or_else(PlanManager::new);
+        let permission_manager = self.permission_manager.clone();
+        let working_dir = self.working_dir.clone();
 
         if self.include_search {
-            tools.push(Box::new(ToolWrapper::new(RigGlobTool::new(self.working_dir.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigGrepTool::new(self.working_dir.clone()))));
+            tools.push(Box::new(Self::wrap_tool(RigGlobTool::new(working_dir.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigGrepTool::new(working_dir.clone()), permission_manager.as_ref())));
         }
 
         if self.include_file {
-            tools.push(Box::new(ToolWrapper::new(RigReadTool::new(self.working_dir.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigWriteTool::new(self.working_dir.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigEditTool::new(self.working_dir.clone()))));
+            tools.push(Box::new(Self::wrap_tool(RigReadTool::new(working_dir.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigWriteTool::new(working_dir.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigEditTool::new(working_dir.clone()), permission_manager.as_ref())));
         }
 
         if self.include_exec {
-            tools.push(Box::new(ToolWrapper::new(RigBashTool::new(self.working_dir.clone(), task_manager.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigTaskOutputTool::new(task_manager.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigTaskStopTool::new(task_manager.clone()))));
+            tools.push(Box::new(Self::wrap_tool(RigBashTool::new(working_dir.clone(), task_manager.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigTaskOutputTool::new(task_manager.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigTaskStopTool::new(task_manager.clone()), permission_manager.as_ref())));
         }
 
         if self.include_task {
             use crate::task::tools::*;
-            tools.push(Box::new(ToolWrapper::new(RigTaskCreateTool::new(task_manager.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigTaskListTool::new(task_manager.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigTaskGetTool::new(task_manager.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigTaskUpdateTool::new(task_manager.clone()))));
+            tools.push(Box::new(Self::wrap_tool(RigTaskCreateTool::new(task_manager.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigTaskListTool::new(task_manager.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigTaskGetTool::new(task_manager.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigTaskUpdateTool::new(task_manager.clone()), permission_manager.as_ref())));
         }
 
         if self.include_interaction {
-            tools.push(Box::new(ToolWrapper::new(RigAskUserQuestionTool::new())));
+            tools.push(Box::new(Self::wrap_tool(RigAskUserQuestionTool::new(), permission_manager.as_ref())));
         }
 
         if self.include_plan {
-            tools.push(Box::new(ToolWrapper::new(RigEnterPlanModeTool::new(plan_manager.clone()))));
-            tools.push(Box::new(ToolWrapper::new(RigExitPlanModeTool::new(plan_manager.clone()))));
+            tools.push(Box::new(Self::wrap_tool(RigEnterPlanModeTool::new(plan_manager.clone()), permission_manager.as_ref())));
+            tools.push(Box::new(Self::wrap_tool(RigExitPlanModeTool::new(plan_manager.clone()), permission_manager.as_ref())));
         }
 
         tools
+    }
+
+    fn wrap_tool<T: Tool + Clone>(tool: T, permission_manager: Option<&PermissionManager>) -> ToolWrapper<T> {
+        let mut wrapper = ToolWrapper::new(tool);
+        if let Some(pm) = permission_manager {
+            wrapper = wrapper.with_permission_manager(pm.clone());
+        }
+        wrapper
     }
 }
 

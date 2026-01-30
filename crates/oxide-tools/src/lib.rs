@@ -13,6 +13,7 @@
 pub mod exec;
 pub mod file;
 pub mod interaction;
+pub mod permission;
 pub mod plan;
 pub mod registry;
 pub mod rig_tools;
@@ -24,6 +25,7 @@ pub mod web;
 pub use exec::{BashTool, TaskOutputTool, TaskStopTool};
 pub use file::{EditTool, ReadTool, WriteTool};
 pub use interaction::{AskUserQuestionTool, QuestionOption, QuestionType};
+pub use permission::PermissionManager;
 pub use plan::{PlanManager, RigEnterPlanModeTool, RigExitPlanModeTool};
 pub use registry::{Tool, ToolRegistry, ToolResult, ToolSchema};
 pub use search::{GlobTool, GrepTool};

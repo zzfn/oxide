@@ -53,12 +53,45 @@ mod tests {
             .call(super::super::tools::ExitPlanModeArgs {
                 plan_content: "# Test Plan\n\n## Steps\n1. Step 1\n2. Step 2".to_string(),
                 plan_title: Some("Test Implementation Plan".to_string()),
+                allowed_prompts: None,
             })
             .await
             .unwrap();
 
         assert!(!result.plan_id.is_empty());
         assert!(result.message.contains("计划已保存"));
+        assert!(!manager.is_plan_mode().await);
+    }
+
+    #[tokio::test]
+    async fn test_exit_plan_mode_with_permissions() {
+        let manager = PlanManager::new();
+        manager.enter_plan_mode(None).await;
+
+        let tool = RigExitPlanModeTool::new(manager.clone());
+
+        let result = tool
+            .call(super::super::tools::ExitPlanModeArgs {
+                plan_content: "# Test Plan\n\n## Steps\n1. Run tests\n2. Install deps".to_string(),
+                plan_title: Some("Test with Permissions".to_string()),
+                allowed_prompts: Some(vec![
+                    super::super::tools::AllowedPromptArg {
+                        tool: "Bash".to_string(),
+                        prompt: "run tests".to_string(),
+                    },
+                    super::super::tools::AllowedPromptArg {
+                        tool: "Bash".to_string(),
+                        prompt: "install dependencies".to_string(),
+                    },
+                ]),
+            })
+            .await
+            .unwrap();
+
+        assert!(!result.plan_id.is_empty());
+        assert!(result.message.contains("计划已保存"));
+        assert!(result.message.contains("请求的权限"));
+        assert!(result.message.contains("run tests"));
         assert!(!manager.is_plan_mode().await);
     }
 }

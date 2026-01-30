@@ -228,6 +228,13 @@ impl PersistedTask {
     }
 }
 
+/// 权限提示
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllowedPrompt {
+    pub tool: String,
+    pub prompt: String,
+}
+
 /// 计划文件
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plan {
@@ -236,6 +243,8 @@ pub struct Plan {
     pub content: String,
     pub created_at: DateTime<Utc>,
     pub session_id: Uuid,
+    #[serde(default)]
+    pub allowed_prompts: Vec<AllowedPrompt>,
 }
 
 impl Plan {
@@ -246,7 +255,13 @@ impl Plan {
             content,
             created_at: Utc::now(),
             session_id,
+            allowed_prompts: Vec::new(),
         }
+    }
+
+    pub fn with_allowed_prompts(mut self, prompts: Vec<AllowedPrompt>) -> Self {
+        self.allowed_prompts = prompts;
+        self
     }
 
     /// 保存计划

@@ -152,7 +152,8 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 - [x] **EnterPlanMode**: 进入计划模式
 - [x] **ExitPlanMode**: 退出并请求批准
 - [x] 计划文件管理
-- [ ] 权限请求系统
+- [x] 权限请求系统（声明）
+- [x] 工具执行权限控制（基础实现）
 
 #### 3.3 任务管理系统
 - [x] **TaskCreate**: 创建任务
@@ -500,11 +501,11 @@ oxide/
   - 代理主循环已完成（工具调用、流式输出）
   - 待完成: 网页获取 (WebFetch)
 
-- **Phase 3 (高级功能)**: 35% 完成
+- **Phase 3 (高级功能)**: 40% 完成
   - 任务管理系统已完成 (TaskCreate, TaskList, TaskGet, TaskUpdate)
   - 任务依赖关系管理和循环依赖检测已完成
-  - 计划模式已完成 (EnterPlanMode, ExitPlanMode)
-  - 待完成: 子代理系统、用户交互工具 (AskUserQuestion)、权限请求系统
+  - 计划模式已完成 (EnterPlanMode, ExitPlanMode, 权限请求系统)
+  - 待完成: 子代理系统、用户交互工具完善
 
 ### ⏳ 未开始
 - **Phase 3 (高级功能 - 剩余部分)**: 子代理系统、计划模式、用户交互
