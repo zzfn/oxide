@@ -3,18 +3,15 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::RwLock;
 use tokio::time::timeout;
 
 use crate::registry::{Tool, ToolResult, ToolSchema};
-use crate::task::{BackgroundTask, TaskManager};
+use crate::task::TaskManager;
 
 /// Bash 工具参数
 #[derive(Debug, Deserialize)]

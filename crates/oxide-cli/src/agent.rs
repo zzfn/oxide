@@ -19,8 +19,6 @@ pub struct RigAgentRunner {
     working_dir: PathBuf,
     /// 任务管理器（用于后台任务）
     task_manager: TaskManager,
-    /// 渲染器
-    renderer: Renderer,
     /// 系统提示词
     system_prompt: Option<String>,
 }
@@ -31,7 +29,6 @@ impl RigAgentRunner {
         Self {
             working_dir,
             task_manager: oxide_tools::rig_tools::create_task_manager(),
-            renderer: Renderer::new(),
             system_prompt: None,
         }
     }
@@ -139,24 +136,52 @@ impl RigAgentRunner {
         let mut full_response = String::new();
 
         // 逐块处理流式输出
+        use std::io::Write;
+        let mut is_thinking = false;
+
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
-                    // 打印文本到终端
+                    if is_thinking {
+                        println!("\n");
+                        is_thinking = false;
+                    }
                     print!("{}", text.text);
-                    use std::io::Write;
                     let _ = std::io::stdout().flush();
-
-                    // 收集完整响应
                     full_response.push_str(&text.text);
                 }
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning))) => {
+                    if !is_thinking {
+                        println!("\n💭 思考中:");
+                        is_thinking = true;
+                    }
+                    for r in reasoning.reasoning {
+                        print!("{}", r);
+                        let _ = std::io::stdout().flush();
+                    }
+                }
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
+                    if !is_thinking {
+                        println!("\n💭 思考中:");
+                        is_thinking = true;
+                    }
+                    print!("{}", reasoning);
+                    let _ = std::io::stdout().flush();
+                }
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall(tool_call))) => {
+                    if is_thinking {
+                        println!("\n");
+                        is_thinking = false;
+                    }
+                    println!("\n🔧 调用工具: {}", tool_call.function.name);
+                }
+                Ok(MultiTurnStreamItem::StreamUserItem(rig::streaming::StreamedUserContent::ToolResult(_))) => {
+                    println!("✓ 工具执行完成");
+                }
                 Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
-                    // 最终响应
                     full_response = final_res.response().to_string();
                 }
-                Ok(_) => {
-                    // 忽略其他类型（工具调用等）
-                }
+                Ok(_) => {}
                 Err(e) => {
                     return Err(anyhow::anyhow!("流式输出错误: {}", e));
                 }
