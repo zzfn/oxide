@@ -104,8 +104,8 @@ where
         async move {
             // 权限检查
             if let Some(pm) = &permission_manager {
-                // 1. 检查工具是否被配置禁止
-                if !pm.is_allowed(T::NAME).await {
+                // 1. 检查工具是否被明确拒绝
+                if pm.is_denied(T::NAME).await {
                     if show_progress {
                         println!(
                             "  {} 工具 {} 被权限配置禁止",

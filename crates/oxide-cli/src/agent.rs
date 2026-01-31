@@ -48,10 +48,29 @@ fn create_confirmation_callback() -> oxide_tools::ConfirmationCallback {
     })
 }
 
+/// 创建持久化回调
+fn create_persist_callback() -> oxide_tools::PersistCallback {
+    Arc::new(|tool_name: String| {
+        Box::pin(async move {
+            use oxide_core::config::{config_path, Config};
+
+            if config_path().is_ok() {
+                if let Ok(mut config) = Config::load() {
+                    if !config.permissions.allow.contains(&tool_name) {
+                        config.permissions.allow.push(tool_name.clone());
+                        let _ = config.save();
+                    }
+                }
+            }
+        })
+    })
+}
+
 /// 创建权限管理器
 fn create_permission_manager(config: PermissionsConfig) -> PermissionManager {
     PermissionManager::new(config)
         .with_confirmation_callback(create_confirmation_callback())
+        .with_persist_callback(create_persist_callback())
 }
 
 /// 基于 rig 的代理

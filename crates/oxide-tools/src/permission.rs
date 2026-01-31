@@ -28,6 +28,9 @@ pub type ConfirmationCallback = Arc<
     dyn Fn(String) -> Pin<Box<dyn Future<Output = ConfirmationResult> + Send>> + Send + Sync,
 >;
 
+/// 持久化回调类型 - 用于将工具添加到配置文件的 allow 列表
+pub type PersistCallback = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
 /// 权限管理器
 #[derive(Clone)]
 pub struct PermissionManager {
@@ -38,6 +41,8 @@ pub struct PermissionManager {
     require_confirmation: bool,
     /// 确认回调
     confirmation_callback: Option<ConfirmationCallback>,
+    /// 持久化回调
+    persist_callback: Option<PersistCallback>,
 }
 
 impl PermissionManager {
@@ -47,6 +52,7 @@ impl PermissionManager {
             approved_tools: Arc::new(RwLock::new(HashSet::new())),
             require_confirmation: true,
             confirmation_callback: None,
+            persist_callback: None,
         }
     }
 
@@ -62,10 +68,22 @@ impl PermissionManager {
         self
     }
 
+    /// 设置持久化回调
+    pub fn with_persist_callback(mut self, callback: PersistCallback) -> Self {
+        self.persist_callback = Some(callback);
+        self
+    }
+
     /// 检查工具是否被允许执行
     pub async fn is_allowed(&self, tool_name: &str) -> bool {
         let config = self.config.read().await;
         config.is_allowed(tool_name)
+    }
+
+    /// 检查工具是否被明确拒绝
+    pub async fn is_denied(&self, tool_name: &str) -> bool {
+        let config = self.config.read().await;
+        config.is_denied(tool_name)
     }
 
     /// 检查工具是否需要用户确认
@@ -74,14 +92,21 @@ impl PermissionManager {
             return false;
         }
 
-        // 检查是否是危险工具
-        if !DANGEROUS_TOOLS.contains(&tool_name) {
+        // 检查是否已经批准过
+        let approved = self.approved_tools.read().await;
+        if approved.contains(tool_name) {
             return false;
         }
 
-        // 检查是否已经批准过
-        let approved = self.approved_tools.read().await;
-        !approved.contains(tool_name)
+        let config = self.config.read().await;
+
+        // 1. 如果工具不在 allow 列表中（且 allow 列表不为空），需要确认
+        if config.needs_approval(tool_name) {
+            return true;
+        }
+
+        // 2. 如果是危险工具，需要确认
+        DANGEROUS_TOOLS.contains(&tool_name)
     }
 
     /// 请求用户确认
@@ -99,8 +124,11 @@ impl PermissionManager {
                     self.approve_tool(tool_name).await;
                 }
                 ConfirmationResult::AllowAlways => {
-                    // 持久化允许（TODO: 写入配置文件）
+                    // 持久化允许
                     self.approve_tool(tool_name).await;
+                    if let Some(persist) = &self.persist_callback {
+                        persist(tool_name.to_string()).await;
+                    }
                 }
                 ConfirmationResult::Deny => {
                     // 拒绝，不做任何操作
@@ -127,6 +155,14 @@ impl PermissionManager {
     /// 检查是否有确认回调
     pub fn has_confirmation_callback(&self) -> bool {
         self.confirmation_callback.is_some()
+    }
+
+    /// 持久化工具到 allow 列表
+    pub async fn persist_tool(&self, tool_name: &str) {
+        let mut config = self.config.write().await;
+        if !config.allow.contains(&tool_name.to_string()) {
+            config.allow.push(tool_name.to_string());
+        }
     }
 }
 

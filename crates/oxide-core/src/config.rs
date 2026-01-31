@@ -266,6 +266,16 @@ impl PermissionsConfig {
         // 如果 allow 列表不为空，只允许列表中的工具
         self.allow.is_empty() || self.allow.contains(&tool.to_string())
     }
+
+    /// 检查工具是否被明确拒绝
+    pub fn is_denied(&self, tool: &str) -> bool {
+        self.deny.contains(&tool.to_string())
+    }
+
+    /// 检查工具是否需要用户确认（不在 allow 列表中且 allow 列表不为空）
+    pub fn needs_approval(&self, tool: &str) -> bool {
+        !self.allow.is_empty() && !self.allow.contains(&tool.to_string())
+    }
 }
 
 /// 行为配置
