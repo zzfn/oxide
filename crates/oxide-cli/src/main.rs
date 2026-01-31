@@ -51,6 +51,9 @@ async fn main() -> Result<()> {
         // 设置工作目录
         state.working_dir = working_dir;
 
+        // 设置配置
+        state.set_config(config.clone());
+
         // 从环境变量获取配置（环境变量优先级最高）
         match Env::api_key() {
             Ok(api_key) => {

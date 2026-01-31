@@ -167,11 +167,15 @@ impl Repl {
             (state.conversation.messages.clone(), state.working_dir.clone())
         };
 
-        // 加载指令文件
-        let instructions = oxide_core::config::load_instructions(&working_dir).unwrap_or_default();
+        // 加载指令文件和配置
+        let (instructions, permissions_config) = {
+            let state = self.state.read().await;
+            let instructions = oxide_core::config::load_instructions(&working_dir).unwrap_or_default();
+            (instructions, state.config.permissions.clone())
+        };
 
-        // 创建 Agent Runner
-        let mut agent_runner = crate::agent::RigAgentRunner::new(working_dir);
+        // 创建 Agent Runner（使用配置的权限）
+        let mut agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config);
         if !instructions.is_empty() {
             agent_runner = agent_runner.with_system_prompt(&instructions);
         }

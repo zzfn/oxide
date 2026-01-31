@@ -152,32 +152,40 @@ impl Command for ConfigCommand {
     }
 
     fn description(&self) -> &str {
-        "查看或修改配置"
-    }
-
-    fn usage(&self) -> &str {
-        "/config [key] [value]"
+        "显示当前配置"
     }
 
     async fn execute(&self, args: &[&str], state: SharedAppState) -> Result<CommandResult> {
         let state = state.read().await;
 
-        if args.is_empty() {
-            // 显示当前配置
-            let msg = format!(
-                "## 当前配置\n\n\
-                - 模式: {}\n\
-                - 工作目录: {}\n\
-                - 会话 ID: {}",
-                state.mode.display_name(),
-                state.working_dir.display(),
-                state.session_id.as_deref().unwrap_or("无")
-            );
-            return Ok(CommandResult::Message(msg));
+        let mut output = String::from("## 当前配置\n\n");
+        output.push_str(&format!("**运行模式**: {}\n", state.mode.display_name()));
+        output.push_str(&format!("**工作目录**: {}\n", state.working_dir.display()));
+        output.push_str(&format!(
+            "**Token 使用**: {}\n",
+            state.token_usage.format()
+        ));
+
+        if let Some(session_id) = &state.session_id {
+            output.push_str(&format!("**会话 ID**: {}\n", session_id));
         }
 
-        // TODO: 实现配置修改
-        Ok(CommandResult::Message("配置修改功能尚未实现。".to_string()))
+        output.push_str("\n### 模型配置\n");
+        output.push_str(&format!("- 默认模型: {}\n", state.config.model.default_model));
+        output.push_str(&format!("- 温度: {}\n", state.config.model.temperature));
+        output.push_str(&format!("- Max Tokens: {}\n", state.config.model.max_tokens));
+
+        output.push_str("\n### 权限配置\n");
+        if state.config.permissions.allow.is_empty() {
+            output.push_str("- 允许: 全部\n");
+        } else {
+            output.push_str(&format!("- 允许: {}\n", state.config.permissions.allow.join(", ")));
+        }
+        if !state.config.permissions.deny.is_empty() {
+            output.push_str(&format!("- 禁止: {}\n", state.config.permissions.deny.join(", ")));
+        }
+
+        Ok(CommandResult::Message(output))
     }
 }
 
@@ -196,6 +204,29 @@ impl Command for QuitCommand {
 
     async fn execute(&self, _args: &[&str], _state: SharedAppState) -> Result<CommandResult> {
         Ok(CommandResult::Exit)
+    }
+}
+
+/// 重载配置命令
+pub struct ReloadConfigCommand;
+
+#[async_trait]
+impl Command for ReloadConfigCommand {
+    fn name(&self) -> &str {
+        "reload-config"
+    }
+
+    fn description(&self) -> &str {
+        "重新加载配置文件"
+    }
+
+    async fn execute(&self, _args: &[&str], state: SharedAppState) -> Result<CommandResult> {
+        let mut state = state.write().await;
+
+        match state.reload_config() {
+            Ok(_) => Ok(CommandResult::Message("✓ 配置已重新加载".to_string())),
+            Err(e) => Ok(CommandResult::Message(format!("✗ 配置加载失败: {}", e))),
+        }
     }
 }
 

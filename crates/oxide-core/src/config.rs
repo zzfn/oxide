@@ -148,7 +148,44 @@ impl Config {
             .map_err(|e| OxideError::Config(format!("读取配置文件失败: {}", e)))?;
         let config: Config = toml::from_str(&content)
             .map_err(|e| OxideError::Config(format!("解析配置文件失败: {}", e)))?;
+
+        // 验证配置
+        config.validate()?;
+
         Ok(config)
+    }
+
+    /// 验证配置
+    pub fn validate(&self) -> Result<()> {
+        // 验证模型名称
+        if self.model.default_model.is_empty() {
+            return Err(OxideError::Config("模型名称不能为空".into()));
+        }
+
+        // 验证温度参数
+        if self.model.temperature < 0.0 || self.model.temperature > 1.0 {
+            return Err(OxideError::Config(format!(
+                "温度参数必须在 0.0-1.0 之间，当前值: {}",
+                self.model.temperature
+            )));
+        }
+
+        // 验证 max_tokens
+        if self.model.max_tokens == 0 {
+            return Err(OxideError::Config("max_tokens 必须大于 0".into()));
+        }
+
+        // 验证权限配置冲突
+        for tool in &self.permissions.allow {
+            if self.permissions.deny.contains(tool) {
+                return Err(OxideError::Config(format!(
+                    "工具 '{}' 同时出现在 allow 和 deny 列表中",
+                    tool
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     /// 保存配置到默认路径

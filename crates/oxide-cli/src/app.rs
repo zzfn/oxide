@@ -3,6 +3,7 @@
 //! 管理 CLI 的全局状态，包括运行模式、Token 使用统计、会话信息等。
 
 use oxide_core::types::Conversation;
+use oxide_core::Config;
 use oxide_provider::{LLMProvider, RigAnthropicProvider};
 use oxide_tools::ToolRegistry;
 use std::path::PathBuf;
@@ -132,6 +133,8 @@ pub struct AppState {
     pub rig_provider: Option<Arc<RigAnthropicProvider>>,
     /// Rig Agent Runner（新版）
     pub agent_runner: Option<RigAgentRunner>,
+    /// 配置
+    pub config: Config,
 }
 
 impl AppState {
@@ -150,7 +153,20 @@ impl AppState {
             tool_registry: None,
             rig_provider: None,
             agent_runner: None,
+            config: Config::default(),
         }
+    }
+
+    /// 设置配置
+    pub fn set_config(&mut self, config: Config) {
+        self.config = config;
+    }
+
+    /// 重新加载配置
+    pub fn reload_config(&mut self) -> anyhow::Result<()> {
+        let config = Config::load_with_project(&self.working_dir)?;
+        self.config = config;
+        Ok(())
     }
 
     /// 设置 LLM Provider（旧版）

@@ -48,8 +48,8 @@ fn create_confirmation_callback() -> oxide_tools::ConfirmationCallback {
 }
 
 /// 创建权限管理器
-fn create_permission_manager() -> PermissionManager {
-    PermissionManager::new(PermissionsConfig::default())
+fn create_permission_manager(config: PermissionsConfig) -> PermissionManager {
+    PermissionManager::new(config)
         .with_confirmation_callback(create_confirmation_callback())
 }
 
@@ -71,7 +71,17 @@ impl RigAgentRunner {
         Self {
             working_dir,
             task_manager: oxide_tools::rig_tools::create_task_manager(),
-            permission_manager: create_permission_manager(),
+            permission_manager: create_permission_manager(PermissionsConfig::default()),
+            system_prompt: None,
+        }
+    }
+
+    /// 创建新的代理运行器（带配置）
+    pub fn new_with_config(working_dir: PathBuf, config: PermissionsConfig) -> Self {
+        Self {
+            working_dir,
+            task_manager: oxide_tools::rig_tools::create_task_manager(),
+            permission_manager: create_permission_manager(config),
             system_prompt: None,
         }
     }
