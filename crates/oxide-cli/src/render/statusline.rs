@@ -104,6 +104,7 @@ impl StatusLine {
 
         // 显示完成状态
         if let Some(bar) = self.status_bar.take() {
+            bar.set_style(ProgressStyle::default_bar().template("{msg}").unwrap());
             bar.finish_with_message(format!(
                 "{} Completed in {}",
                 "✻".bright_cyan(),
