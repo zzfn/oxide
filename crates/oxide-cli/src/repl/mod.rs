@@ -171,19 +171,26 @@ impl Repl {
             (state.conversation.messages.clone(), state.working_dir.clone())
         };
 
-        // 加载指令文件和配置
-        let (instructions, permissions_config) = {
+        // 加载指令文件和配置，构建完整系统提示词
+        let (system_prompt, permissions_config) = {
             let state = self.state.read().await;
-            let instructions = oxide_core::config::load_instructions(&working_dir).unwrap_or_default();
-            (instructions, state.config.permissions.clone())
+
+            // 使用 PromptBuilder 构建完整的系统提示词
+            let context = oxide_core::prompt::RuntimeContext::from_env(working_dir.clone())
+                .with_model("Claude", &state.config.model.default_model);
+
+            let prompt = oxide_core::prompt::PromptBuilder::default_agent()
+                .with_context(context)
+                .with_user_instructions(&working_dir)
+                .build();
+
+            (prompt.system, state.config.permissions.clone())
         };
 
         // 创建 Agent Runner（使用配置的权限）
-        let mut agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config)
-            .with_multi_progress(self.renderer.multi_progress().clone());
-        if !instructions.is_empty() {
-            agent_runner = agent_runner.with_system_prompt(&instructions);
-        }
+        let agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config)
+            .with_multi_progress(self.renderer.multi_progress().clone())
+            .with_system_prompt(&system_prompt);
 
         // 显示助手响应头部
         self.renderer.assistant_header();
