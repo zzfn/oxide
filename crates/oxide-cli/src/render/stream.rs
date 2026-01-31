@@ -7,6 +7,8 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetForegroundColor},
 };
 use std::io::{self, Write};
+use std::thread;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 /// 流式渲染器
@@ -15,6 +17,8 @@ pub struct StreamRenderer {
     buffer: String,
     /// 是否在代码块中
     in_code_block: bool,
+    /// 流式输出延迟（毫秒）
+    delay_ms: u64,
 }
 
 impl StreamRenderer {
@@ -23,7 +27,25 @@ impl StreamRenderer {
         Self {
             buffer: String::new(),
             in_code_block: false,
+            delay_ms: 30,
         }
+    }
+
+    /// 设置流式输出延迟
+    pub fn with_delay(mut self, delay_ms: u64) -> Self {
+        self.delay_ms = delay_ms;
+        self
+    }
+
+    /// 流式输出文本（带打字机效果）
+    pub fn stream_text(&mut self, text: &str) -> io::Result<()> {
+        let mut stdout = io::stdout();
+        for ch in text.chars() {
+            print!("{}", ch);
+            stdout.flush()?;
+            thread::sleep(Duration::from_millis(self.delay_ms));
+        }
+        Ok(())
     }
 
     /// 处理流式文本片段

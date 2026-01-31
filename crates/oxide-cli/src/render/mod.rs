@@ -5,10 +5,12 @@
 pub mod markdown;
 pub mod spinner;
 pub mod stream;
+pub mod tool_status;
 
 pub use markdown::MarkdownRenderer;
 pub use spinner::Spinner;
 pub use stream::{StreamChannel, StreamRenderer};
+pub use tool_status::{ToolStatus, ToolStatusDisplay};
 
 use colored::Colorize;
 use std::io::Write;
@@ -16,6 +18,8 @@ use std::io::Write;
 /// 统一渲染接口
 pub struct Renderer {
     markdown: MarkdownRenderer,
+    stream: StreamRenderer,
+    tool_status: ToolStatusDisplay,
 }
 
 impl Renderer {
@@ -23,7 +27,19 @@ impl Renderer {
     pub fn new() -> Self {
         Self {
             markdown: MarkdownRenderer::new(),
+            stream: StreamRenderer::new(),
+            tool_status: ToolStatusDisplay::new(),
         }
+    }
+
+    /// 获取流式渲染器的可变引用
+    pub fn stream_mut(&mut self) -> &mut StreamRenderer {
+        &mut self.stream
+    }
+
+    /// 获取工具状态显示器的可变引用
+    pub fn tool_status_mut(&mut self) -> &mut ToolStatusDisplay {
+        &mut self.tool_status
     }
 
     /// 显示欢迎信息

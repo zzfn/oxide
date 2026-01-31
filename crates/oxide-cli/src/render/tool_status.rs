@@ -10,8 +10,8 @@ use std::io::{self, Write};
 pub enum ToolStatus {
     /// 调用中
     Calling,
-    /// 执行中
-    Executing,
+    /// 执行中（带描述）
+    Executing(String),
     /// 成功
     Success,
     /// 失败
@@ -22,10 +22,16 @@ pub enum ToolStatus {
 pub struct ToolStatusDisplay {
     /// 当前工具名称
     current_tool: Option<String>,
+    /// 当前描述
+    current_desc: Option<String>,
     /// 当前状态
     current_status: Option<ToolStatus>,
     /// 是否已显示
     is_displayed: bool,
+    /// Spinner 帧
+    spinner_frames: Vec<&'static str>,
+    /// 当前帧索引
+    frame_index: usize,
 }
 
 impl ToolStatusDisplay {
@@ -33,9 +39,52 @@ impl ToolStatusDisplay {
     pub fn new() -> Self {
         Self {
             current_tool: None,
+            current_desc: None,
             current_status: None,
             is_displayed: false,
+            spinner_frames: vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            frame_index: 0,
         }
+    }
+
+    /// 开始工具调用（显示初始状态）
+    pub fn start_tool(&mut self, tool_name: &str, description: &str) -> io::Result<()> {
+        println!();
+        println!("⏺ {}({})", tool_name, description);
+        self.current_tool = Some(tool_name.to_string());
+        self.current_desc = Some(description.to_string());
+        self.is_displayed = true;
+        Ok(())
+    }
+
+    /// 更新执行状态（带 spinner）
+    pub fn update_executing(&mut self, step: &str) -> io::Result<()> {
+        if !self.is_displayed {
+            println!();
+        }
+
+        let frame = self.spinner_frames[self.frame_index % self.spinner_frames.len()];
+        self.frame_index += 1;
+
+        print!("\r\x1B[2K⎿  {} {}", frame, step);
+        io::stdout().flush()?;
+        Ok(())
+    }
+
+    /// 完成工具调用（带统计信息）
+    pub fn finish_tool(&mut self, summary: Option<&str>) -> io::Result<()> {
+        if let Some(info) = summary {
+            print!("\r\x1B[2K⎿  Done ({})", info);
+        } else {
+            print!("\r\x1B[2K⎿  Done");
+        }
+        io::stdout().flush()?;
+        println!();
+        self.is_displayed = false;
+        self.current_tool = None;
+        self.current_desc = None;
+        self.frame_index = 0;
+        Ok(())
     }
 
     /// 更新工具状态
@@ -58,9 +107,9 @@ impl ToolStatusDisplay {
                 format!("调用工具: {}", tool_name),
                 |s| s.bright_yellow(),
             ),
-            ToolStatus::Executing => (
+            ToolStatus::Executing(ref desc) => (
                 "⚙",
-                format!("执行工具: {}", tool_name),
+                format!("执行工具: {} - {}", tool_name, desc),
                 |s| s.bright_cyan(),
             ),
             ToolStatus::Success => (
