@@ -4,11 +4,59 @@
 
 use anyhow::Result;
 use clap::Parser;
+use opentelemetry::global;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry::KeyValue;
+use opentelemetry_langfuse::ExporterBuilder;
+use opentelemetry_sdk::trace::{span_processor_with_async_runtime::BatchSpanProcessor, SdkTracerProvider};
+use opentelemetry_sdk::Resource;
 use oxide_core::{Config, Env};
 use oxide_provider::RigAnthropicProvider;
 use std::path::PathBuf;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use oxide_cli::{commands, create_shared_state, repl::Repl};
+
+/// 初始化 Langfuse tracing
+fn init_langfuse_tracing() {
+    // 检查环境变量是否配置
+    if std::env::var("LANGFUSE_PUBLIC_KEY").is_err()
+        || std::env::var("LANGFUSE_SECRET_KEY").is_err()
+    {
+        return; // 未配置则跳过
+    }
+
+    let exporter = match ExporterBuilder::from_env().and_then(|b| b.build()) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("⚠️  Langfuse exporter 初始化失败: {}", e);
+            return;
+        }
+    };
+
+    let batch_processor = BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio).build();
+
+    let provider = SdkTracerProvider::builder()
+        .with_span_processor(batch_processor)
+        .with_resource(
+            Resource::builder()
+                .with_attributes(vec![KeyValue::new("service.name", "oxide-cli")])
+                .build(),
+        )
+        .build();
+
+    global::set_tracer_provider(provider.clone());
+
+    let tracer = provider.tracer("oxide");
+    let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    tracing_subscriber::registry()
+        .with(telemetry_layer)
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    eprintln!("✅ Langfuse tracing 已启用");
+}
 
 /// Oxide - AI 编程助手
 #[derive(Parser, Debug)]
@@ -30,6 +78,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // 初始化 Langfuse tracing（可选，需配置环境变量）
+    init_langfuse_tracing();
+
     let args = Args::parse();
 
     // 初始化工作目录
