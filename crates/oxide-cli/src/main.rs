@@ -17,8 +17,12 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use oxide_cli::{commands, create_shared_state, repl::Repl};
 
-/// 初始化 Langfuse tracing
-fn init_langfuse_tracing() {
+/// 初始化 Langfuse tracing（仅在 debug 模式下启用）
+fn init_langfuse_tracing(debug: bool) {
+    if !debug {
+        return; // 非 debug 模式跳过
+    }
+
     // 检查环境变量是否配置
     if std::env::var("LANGFUSE_PUBLIC_KEY").is_err()
         || std::env::var("LANGFUSE_SECRET_KEY").is_err()
@@ -78,9 +82,6 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 初始化 Langfuse tracing（可选，需配置环境变量）
-    init_langfuse_tracing();
-
     let args = Args::parse();
 
     // 初始化工作目录
@@ -91,6 +92,9 @@ async fn main() -> Result<()> {
     // 加载配置（全局 + 项目级）
     let config = Config::load_with_project(&working_dir)?;
     Config::init_directories()?;
+
+    // 初始化 Langfuse tracing（仅在 debug 模式下启用）
+    init_langfuse_tracing(config.behavior.debug);
 
     // 创建共享状态
     let state = create_shared_state();

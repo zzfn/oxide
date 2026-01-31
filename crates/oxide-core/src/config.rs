@@ -131,6 +131,9 @@ impl Config {
         if !local.permissions.deny.is_empty() {
             self.permissions.deny = local.permissions.deny;
         }
+        if local.behavior.debug != BehaviorConfig::default().debug {
+            self.behavior.debug = local.behavior.debug;
+        }
         if local.behavior.thinking_mode != BehaviorConfig::default().thinking_mode {
             self.behavior.thinking_mode = local.behavior.thinking_mode;
         }
@@ -268,6 +271,8 @@ impl PermissionsConfig {
 /// 行为配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BehaviorConfig {
+    /// 是否启用调试模式（启用后会开启 Langfuse tracing 等调试功能）
+    pub debug: bool,
     /// 是否启用思考模式
     pub thinking_mode: bool,
     /// 会话清理周期（秒）
@@ -279,6 +284,7 @@ pub struct BehaviorConfig {
 impl Default for BehaviorConfig {
     fn default() -> Self {
         Self {
+            debug: false,
             thinking_mode: true,
             cleanup_period: 3600,
             auto_save: true,
