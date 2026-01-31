@@ -167,8 +167,14 @@ impl Repl {
             (state.conversation.messages.clone(), state.working_dir.clone())
         };
 
+        // 加载指令文件
+        let instructions = oxide_core::config::load_instructions(&working_dir).unwrap_or_default();
+
         // 创建 Agent Runner
-        let agent_runner = crate::agent::RigAgentRunner::new(working_dir);
+        let mut agent_runner = crate::agent::RigAgentRunner::new(working_dir);
+        if !instructions.is_empty() {
+            agent_runner = agent_runner.with_system_prompt(&instructions);
+        }
 
         // 显示助手响应头部
         self.renderer.assistant_header();

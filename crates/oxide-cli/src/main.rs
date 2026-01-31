@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use oxide_core::Env;
+use oxide_core::{Config, Env};
 use oxide_provider::RigAnthropicProvider;
 use std::path::PathBuf;
 
@@ -32,13 +32,17 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // 创建共享状态
-    let state = create_shared_state();
-
     // 初始化工作目录
     let working_dir = args.dir.clone().map(PathBuf::from).unwrap_or_else(|| {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     });
+
+    // 加载配置（全局 + 项目级）
+    let config = Config::load_with_project(&working_dir)?;
+    Config::init_directories()?;
+
+    // 创建共享状态
+    let state = create_shared_state();
 
     // 初始化 LLM Provider
     {
@@ -47,16 +51,17 @@ async fn main() -> Result<()> {
         // 设置工作目录
         state.working_dir = working_dir;
 
-        // 从环境变量获取配置
+        // 从环境变量获取配置（环境变量优先级最高）
         match Env::api_key() {
             Ok(api_key) => {
                 let base_url = Env::base_url();
-                let model = Env::model_override();
+                let model = Env::model_override()
+                    .unwrap_or_else(|| config.model.default_model.clone());
 
                 let provider = if let Some(url) = base_url {
-                    RigAnthropicProvider::with_base_url(api_key, url, model)
+                    RigAnthropicProvider::with_base_url(api_key, url, Some(model))
                 } else {
-                    RigAnthropicProvider::new(api_key, model)
+                    RigAnthropicProvider::new(api_key, Some(model))
                 };
 
                 // 使用新的 rig provider

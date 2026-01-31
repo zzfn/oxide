@@ -38,6 +38,44 @@ pub fn plans_dir() -> Result<PathBuf> {
     Ok(oxide_home()?.join("plans"))
 }
 
+/// 获取全局 OXIDE.md 路径
+pub fn global_oxide_md() -> Result<PathBuf> {
+    Ok(oxide_home()?.join("OXIDE.md"))
+}
+
+/// 加载指令文件内容
+pub fn load_instructions(project_dir: &PathBuf) -> Result<String> {
+    let mut instructions = String::new();
+
+    // 加载全局 OXIDE.md
+    let global_path = global_oxide_md()?;
+    if global_path.exists() {
+        let content = std::fs::read_to_string(&global_path)?;
+        if !content.trim().is_empty() {
+            instructions.push_str(&format!(
+                "--- CONTEXT ENTRY BEGIN ---\nContents of {} (global instructions):\n\n{}\n--- CONTEXT ENTRY END ---\n\n",
+                global_path.display(),
+                content
+            ));
+        }
+    }
+
+    // 加载项目级 OXIDE.md
+    let project_path = project_dir.join("OXIDE.md");
+    if project_path.exists() {
+        let content = std::fs::read_to_string(&project_path)?;
+        if !content.trim().is_empty() {
+            instructions.push_str(&format!(
+                "--- CONTEXT ENTRY BEGIN ---\nContents of {} (project instructions):\n\n{}\n--- CONTEXT ENTRY END ---\n\n",
+                project_path.display(),
+                content
+            ));
+        }
+    }
+
+    Ok(instructions)
+}
+
 /// Oxide 配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -62,6 +100,45 @@ impl Config {
             Self::load_from(&path)
         } else {
             Ok(Self::default())
+        }
+    }
+
+    /// 加载配置（支持项目级覆盖）
+    pub fn load_with_project(project_dir: &PathBuf) -> Result<Self> {
+        let mut config = Self::load()?;
+        let local_path = project_dir.join(".oxide/config.local.toml");
+        if local_path.exists() {
+            let local = Self::load_from(&local_path)?;
+            config.merge(local);
+        }
+        Ok(config)
+    }
+
+    /// 合并配置（local 覆盖 self）
+    fn merge(&mut self, local: Self) {
+        if local.model.default_model != ModelConfig::default().default_model {
+            self.model.default_model = local.model.default_model;
+        }
+        if local.model.temperature != ModelConfig::default().temperature {
+            self.model.temperature = local.model.temperature;
+        }
+        if local.model.max_tokens != ModelConfig::default().max_tokens {
+            self.model.max_tokens = local.model.max_tokens;
+        }
+        if !local.permissions.allow.is_empty() {
+            self.permissions.allow = local.permissions.allow;
+        }
+        if !local.permissions.deny.is_empty() {
+            self.permissions.deny = local.permissions.deny;
+        }
+        if local.behavior.thinking_mode != BehaviorConfig::default().thinking_mode {
+            self.behavior.thinking_mode = local.behavior.thinking_mode;
+        }
+        if local.behavior.cleanup_period != BehaviorConfig::default().cleanup_period {
+            self.behavior.cleanup_period = local.behavior.cleanup_period;
+        }
+        if local.behavior.auto_save != BehaviorConfig::default().auto_save {
+            self.behavior.auto_save = local.behavior.auto_save;
         }
     }
 
@@ -201,5 +278,57 @@ mod tests {
         };
         assert!(perms.is_allowed("Read"));
         assert!(!perms.is_allowed("Bash"));
+    }
+
+    #[test]
+    fn test_config_merge() {
+        let mut global = Config {
+            model: ModelConfig {
+                default_model: "claude-sonnet-4".to_string(),
+                temperature: 0.7,
+                max_tokens: 8192,
+            },
+            permissions: PermissionsConfig::default(),
+            behavior: BehaviorConfig::default(),
+        };
+
+        let local = Config {
+            model: ModelConfig {
+                default_model: "claude-opus-4".to_string(),
+                temperature: 0.8,
+                max_tokens: 8192,
+            },
+            permissions: PermissionsConfig {
+                allow: vec!["Read".to_string(), "Write".to_string()],
+                deny: vec![],
+            },
+            behavior: BehaviorConfig::default(),
+        };
+
+        global.merge(local);
+
+        assert_eq!(global.model.default_model, "claude-opus-4");
+        assert_eq!(global.model.temperature, 0.8);
+        assert_eq!(global.permissions.allow.len(), 2);
+    }
+
+    #[test]
+    fn test_load_instructions() {
+        use std::fs;
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("oxide_test_instructions");
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let project_md = temp_dir.join("OXIDE.md");
+        fs::write(&project_md, "# Project Instructions\nTest content").unwrap();
+
+        let result = load_instructions(&temp_dir).unwrap();
+
+        assert!(result.contains("Project Instructions"));
+        assert!(result.contains("Test content"));
+        assert!(result.contains("CONTEXT ENTRY BEGIN"));
+
+        fs::remove_dir_all(&temp_dir).ok();
     }
 }
