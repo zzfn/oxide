@@ -20,9 +20,9 @@ pub struct Agent {
     pub id: Uuid,
     pub state: AgentState,
     pub conversation: Conversation,
-    #[allow(dead_code)] // TODO: 将在代理主循环实现时使用
+    #[allow(dead_code)]
     provider: Arc<dyn LLMProvider>,
-    #[allow(dead_code)] // TODO: 将在代理主循环实现时使用
+    #[allow(dead_code)]
     tools: Arc<ToolRegistry>,
 }
 

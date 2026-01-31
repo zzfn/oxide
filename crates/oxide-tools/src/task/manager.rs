@@ -58,7 +58,7 @@ impl TaskManager {
         counter.to_string()
     }
 
-    // ==================== 任务 CRUD 操作 ====================
+    // 任务 CRUD 操作
 
     /// 创建新任务
     pub async fn create_task(
@@ -180,7 +180,7 @@ impl TaskManager {
         Ok(())
     }
 
-    // ==================== 依赖关系管理 ====================
+    // 依赖关系管理
 
     /// 添加任务依赖关系
     pub async fn add_dependency(
@@ -285,7 +285,7 @@ impl TaskManager {
             .collect()
     }
 
-    // ==================== 后台任务管理（向后兼容）====================
+    // 后台任务管理（向后兼容）
 
     /// 获取后台任务管理器（用于 Bash 工具）
     pub fn background_tasks(&self) -> Arc<RwLock<HashMap<String, BackgroundTask>>> {

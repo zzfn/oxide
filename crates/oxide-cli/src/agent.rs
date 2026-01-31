@@ -367,9 +367,7 @@ pub fn create_task_manager() -> TaskManager {
     oxide_tools::rig_tools::create_task_manager()
 }
 
-// ============================================================================
 // 兼容层：保留旧的 Agent 接口以便逐步迁移
-// ============================================================================
 
 use oxide_tools::ToolRegistry;
 
