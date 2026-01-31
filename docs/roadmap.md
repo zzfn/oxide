@@ -192,7 +192,7 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
     - 步骤3：执行工具
   - [x] 会话级权限记忆（approved_tools 缓存）
   - [x] 权限错误返回给 AI（PermissionError）
-  - [ ] 持久化"始终允许"到配置文件
+  - [x] 持久化"始终允许"到配置文件
 
 #### 3.3 任务管理系统
 - [x] **TaskCreate**: 创建任务
@@ -547,7 +547,7 @@ oxide/
 
 ---
 
-**最后更新**: 2026-01-30
+**最后更新**: 2026-02-01
 
 ## 📈 当前进度总结
 
@@ -574,7 +574,7 @@ oxide/
   - 代理主循环已完成（工具调用、流式输出）
   - 待完成: 网页获取 (WebFetch)
 
-- **Phase 3 (高级功能)**: 40% 完成
+- **Phase 3 (高级功能)**: 50% 完成
   - 任务管理系统已完成 (TaskCreate, TaskList, TaskGet, TaskUpdate)
   - 任务依赖关系管理和循环依赖检测已完成
   - 计划模式已完成 (EnterPlanMode, ExitPlanMode, 权限请求系统)
@@ -594,12 +594,13 @@ oxide/
 5. ✅ ~~完成代理主循环，实现工具调用~~
 6. ✅ ~~实现任务管理系统 (TaskCreate, TaskList, TaskGet, TaskUpdate)~~
 7. ✅ ~~实现计划模式 (EnterPlanMode, ExitPlanMode)~~
-8. 实现网页工具 (WebFetch, WebSearch)
-9. 实现子代理系统 (Task Tool)
-10. 实现 Hooks 系统
-11. 实现自动摘要和上下文管理
-12. 实现环境上下文注入
-13. 端到端测试和优化
+8. ✅ ~~实现权限系统持久化~~
+9. 实现网页工具 (WebFetch, WebSearch)
+10. 实现子代理系统 (Task Tool)
+11. 实现 Hooks 系统
+12. 实现自动摘要和上下文管理
+13. 实现环境上下文注入
+14. 端到端测试和优化
 
 ### 📌 新发现的功能差距
 以下功能在原 roadmap 中未列出，但在 Claude Code 中存在：
