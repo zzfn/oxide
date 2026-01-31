@@ -117,3 +117,19 @@ Esc to cancel · Tab to amend · ctrl+e to explain
      … +36 lines (ctrl+o to expand)
 
 ✳ Architecting… (esc to interrupt · 50s · ↓ 854 tokens)
+
+---
+
+❯ ⏺ Bash(systemctl restart app) 最前面的圆形应该是绿色的
+
+✶ Architecting… (esc to interrupt)
+
+---
+
+⏺ Bash(cargo run --example renderer_demo 2>&1 | grep -A 60 "❯ 帮我找到配置文件") timeout: 30s
+⎿  ❯ 帮我找到配置文件并修改端口号
+
+     ⏺ 我来帮你找到配置文件并修改端口号。
+     … +36 lines (ctrl+o to expand)
+
+· Architecting… (esc to interrupt · 55s · ↓ 255 tokens)

@@ -49,8 +49,9 @@ impl ToolStatusDisplay {
 
     /// 开始工具调用（显示初始状态）
     pub fn start_tool(&mut self, tool_name: &str, description: &str) -> io::Result<()> {
+        use colored::Colorize;
         println!();
-        println!("⏺ {}({})", tool_name, description);
+        println!("{} {}({})", "⏺".green(), tool_name, description);
         self.current_tool = Some(tool_name.to_string());
         self.current_desc = Some(description.to_string());
         self.is_displayed = true;
