@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Phase 1](https://img.shields.io/badge/Phase%201-✅%20Complete-brightgreen.svg)](docs/phase1-completion.md)
+[![Phase 1](https://img.shields.io/badge/Phase%201-✅%20Complete-brightgreen.svg)](docs/archive/phase1-completion.md)
 
 > **Oxide** 是一个基于 Rust 构建的、高性能、极简且强大的 AI 驱动编程助手。
 
@@ -15,11 +15,11 @@
 
 查看完成总结：
 
-- [Phase 1 完成总结](docs/phase1-completion.md)
-- [Phase 2.2 完成总结](docs/phase2.2-completion.md) - 文件操作工具
-- [Phase 2.3 完成总结](docs/phase2.3-completion.md) - 搜索工具
-- [Phase 2.4 完成总结](docs/phase2.4-completion.md) - 代理主循环
-- [rig-core 迁移完成](docs/rig-core-migration-complete.md) - rig-core 集成
+- [Phase 1 完成总结](docs/archive/phase1-completion.md)
+- [Phase 2.2 完成总结](docs/archive/phase2.2-completion.md) - 文件操作工具
+- [Phase 2.3 完成总结](docs/archive/phase2.3-completion.md) - 搜索工具
+- [Phase 2.4 完成总结](docs/archive/phase2.4-completion.md) - 代理主循环
+- [rig-core 迁移完成](docs/archive/rig-core-migration-complete.md) - rig-core 集成
 
 ## 🎯 愿景
 
@@ -58,7 +58,7 @@ export OXIDE_BASE_URL=https://your-custom-endpoint.com
 cargo run --example test_api --package oxide-provider
 ```
 
-查看 [快速开始指南](QUICKSTART.md) 了解更多。
+查看 [快速开始指南](docs/QUICKSTART.md) 了解更多。
 
 ## 🏗️ 项目结构
 
@@ -72,10 +72,10 @@ oxide/
 │   └── oxide-cli/           # ✅ CLI 界面（完整的代理循环）
 ├── docs/                    # 文档
 │   ├── roadmap.md          # 完整路线图
-│   ├── phase1-completion.md # Phase 1 总结
-│   ├── phase2.2-completion.md # Phase 2.2 总结（文件工具）
-│   ├── phase2.3-completion.md # Phase 2.3 总结（搜索工具）
-│   └── phase2.4-completion.md # Phase 2.4 总结（代理循环）
+│   ├── QUICKSTART.md       # 快速开始指南
+│   ├── CLI_INTEGRATION.md  # CLI 集成文档
+│   ├── task-system.md      # 任务系统文档
+│   └── archive/            # 历史完成总结
 └── Cargo.toml              # Workspace 配置
 ```
 
@@ -170,13 +170,13 @@ provider.complete_stream(
 
 ## 📖 文档
 
-- [快速开始](QUICKSTART.md)
+- [快速开始](docs/QUICKSTART.md)
 - [完整路线图](docs/roadmap.md)
-- [Phase 1 完成总结](docs/phase1-completion.md)
-- [Phase 2.2 完成总结](docs/phase2.2-completion.md) - 文件操作工具
-- [Phase 2.3 完成总结](docs/phase2.3-completion.md) - 搜索工具
-- [Phase 2.4 完成总结](docs/phase2.4-completion.md) - 代理主循环
-- [CLI 集成文档](CLI_INTEGRATION.md)
+- [Phase 1 完成总结](docs/archive/phase1-completion.md)
+- [Phase 2.2 完成总结](docs/archive/phase2.2-completion.md) - 文件操作工具
+- [Phase 2.3 完成总结](docs/archive/phase2.3-completion.md) - 搜索工具
+- [Phase 2.4 完成总结](docs/archive/phase2.4-completion.md) - 代理主循环
+- [CLI 集成文档](docs/CLI_INTEGRATION.md)
 - [Provider 使用文档](crates/oxide-provider/README.md)
 
 ## 🤝 贡献
