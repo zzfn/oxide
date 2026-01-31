@@ -3,7 +3,7 @@
 //! 管理 CLI 的全局状态，包括运行模式、Token 使用统计、会话信息等。
 
 use oxide_core::types::Conversation;
-use oxide_core::Config;
+use oxide_core::{Config, PromptBuilder, RuntimeContext};
 use oxide_provider::{LLMProvider, RigAnthropicProvider};
 use oxide_tools::ToolRegistry;
 use std::path::PathBuf;
@@ -182,8 +182,21 @@ impl AppState {
     /// 设置 Rig Provider 和 Agent Runner（新版）
     pub fn set_rig_provider(&mut self, provider: RigAnthropicProvider) {
         let working_dir = self.working_dir.clone();
+
+        // 使用 PromptBuilder 构建系统提示词
+        let context = RuntimeContext::from_env(working_dir.clone())
+            .with_model("Claude", &self.config.model.default_model);
+
+        let prompt = PromptBuilder::default_agent()
+            .with_context(context)
+            .with_user_instructions(&working_dir)
+            .build();
+
         self.rig_provider = Some(Arc::new(provider));
-        self.agent_runner = Some(RigAgentRunner::new(working_dir));
+        self.agent_runner = Some(
+            RigAgentRunner::new_with_config(working_dir, self.config.permissions.clone())
+                .with_system_prompt(&prompt.system)
+        );
     }
 
     /// 切换运行模式

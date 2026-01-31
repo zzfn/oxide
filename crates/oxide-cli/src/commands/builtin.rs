@@ -155,7 +155,7 @@ impl Command for ConfigCommand {
         "显示当前配置"
     }
 
-    async fn execute(&self, args: &[&str], state: SharedAppState) -> Result<CommandResult> {
+    async fn execute(&self, _args: &[&str], state: SharedAppState) -> Result<CommandResult> {
         let state = state.read().await;
 
         let mut output = String::from("## 当前配置\n\n");

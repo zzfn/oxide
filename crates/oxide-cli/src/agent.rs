@@ -377,6 +377,7 @@ use oxide_tools::ToolRegistry;
 ///
 /// 注意：此实现已弃用，请使用 RigAgentRunner
 #[deprecated(note = "请使用 RigAgentRunner")]
+#[allow(dead_code)]
 pub struct Agent {
     tool_registry: Arc<ToolRegistry>,
     renderer: Renderer,

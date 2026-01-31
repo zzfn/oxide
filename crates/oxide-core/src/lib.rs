@@ -5,10 +5,12 @@
 pub mod config;
 pub mod env;
 pub mod error;
+pub mod prompt;
 pub mod session;
 pub mod types;
 
 pub use config::Config;
 pub use env::Env;
 pub use error::{OxideError, Result};
+pub use prompt::{BuiltPrompt, PromptBuilder, PromptPart, RuntimeContext, ToolDefinition};
 pub use session::{History, SessionState};
