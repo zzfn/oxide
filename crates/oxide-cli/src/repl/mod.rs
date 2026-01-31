@@ -139,6 +139,9 @@ impl Repl {
             state.start_processing();
         }
 
+        // 启动底部状态行
+        self.renderer.statusline_mut().start("Thinking");
+
         // 检查是否有 Rig Provider
         let rig_provider = {
             let state = self.state.read().await;
@@ -146,6 +149,7 @@ impl Repl {
         };
 
         let Some(provider) = rig_provider else {
+            self.renderer.statusline_mut().clear();
             self.renderer.error("AI Provider 未初始化。请设置 ANTHROPIC_API_KEY 环境变量。");
             let mut state = self.state.write().await;
             state.end_processing();
@@ -175,7 +179,8 @@ impl Repl {
         };
 
         // 创建 Agent Runner（使用配置的权限）
-        let mut agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config);
+        let mut agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config)
+            .with_multi_progress(self.renderer.multi_progress().clone());
         if !instructions.is_empty() {
             agent_runner = agent_runner.with_system_prompt(&instructions);
         }
@@ -183,9 +188,15 @@ impl Repl {
         // 显示助手响应头部
         self.renderer.assistant_header();
 
+        // 更新状态行
+        self.renderer.statusline_mut().update("Processing", 0);
+
         // 运行代理（流式输出）
         match agent_runner.run_stream(&provider, input, chat_history).await {
             Ok(response) => {
+                // 完成状态行
+                self.renderer.statusline_mut().finish();
+
                 // 更新会话历史
                 {
                     let mut state = self.state.write().await;
@@ -199,6 +210,8 @@ impl Repl {
                 }
             }
             Err(e) => {
+                // 清除状态行
+                self.renderer.statusline_mut().clear();
                 println!(); // 换行
                 self.renderer.error(&format!("代理执行失败: {}", e));
 

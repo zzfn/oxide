@@ -3,6 +3,7 @@
 //! 使用 rig Agent 处理工具调用循环，替代自实现的代理循环。
 
 use anyhow::Result;
+use indicatif::MultiProgress;
 use oxide_core::config::PermissionsConfig;
 use oxide_core::types::{ContentBlock, Message, Role};
 use oxide_provider::RigAnthropicProvider;
@@ -63,6 +64,8 @@ pub struct RigAgentRunner {
     permission_manager: PermissionManager,
     /// 系统提示词
     system_prompt: Option<String>,
+    /// MultiProgress 管理器（用于输出）
+    mp: Option<Arc<MultiProgress>>,
 }
 
 impl RigAgentRunner {
@@ -73,6 +76,7 @@ impl RigAgentRunner {
             task_manager: oxide_tools::rig_tools::create_task_manager(),
             permission_manager: create_permission_manager(PermissionsConfig::default()),
             system_prompt: None,
+            mp: None,
         }
     }
 
@@ -83,12 +87,19 @@ impl RigAgentRunner {
             task_manager: oxide_tools::rig_tools::create_task_manager(),
             permission_manager: create_permission_manager(config),
             system_prompt: None,
+            mp: None,
         }
     }
 
     /// 设置系统提示词
     pub fn with_system_prompt(mut self, prompt: &str) -> Self {
         self.system_prompt = Some(prompt.to_string());
+        self
+    }
+
+    /// 设置 MultiProgress 管理器（用于输出）
+    pub fn with_multi_progress(mut self, mp: Arc<MultiProgress>) -> Self {
+        self.mp = Some(mp);
         self
     }
 
@@ -163,6 +174,7 @@ impl RigAgentRunner {
         use rig::agent::MultiTurnStreamItem;
         use rig::streaming::StreamedAssistantContent;
         use futures::StreamExt;
+        use colored::Colorize;
 
         // 创建工具列表（boxed）
         let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
@@ -196,48 +208,89 @@ impl RigAgentRunner {
         // 收集完整响应
         let mut full_response = String::new();
 
-        // 逐块处理流式输出
-        use std::io::Write;
+        // 流式文本缓冲（用于按行输出）
+        let mut line_buffer = String::new();
         let mut is_thinking = false;
+
+        // 辅助函数：输出文本（通过 MultiProgress 或直接输出）
+        let output_line = |mp: &Option<Arc<MultiProgress>>, text: &str| {
+            if let Some(mp) = mp {
+                let _ = mp.println(text);
+            } else {
+                println!("{}", text);
+            }
+        };
+
+        // 辅助函数：刷新行缓冲
+        let flush_buffer = |mp: &Option<Arc<MultiProgress>>, buffer: &mut String| {
+            if !buffer.is_empty() {
+                if let Some(mp) = mp {
+                    let _ = mp.println(buffer.as_str());
+                } else {
+                    println!("{}", buffer);
+                }
+                buffer.clear();
+            }
+        };
 
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
                     if is_thinking {
-                        println!("\n");
+                        flush_buffer(&self.mp, &mut line_buffer);
+                        output_line(&self.mp, "");
                         is_thinking = false;
                     }
-                    print!("{}", text.text);
-                    let _ = std::io::stdout().flush();
+                    // 处理流式文本：按行输出
+                    for ch in text.text.chars() {
+                        if ch == '\n' {
+                            // 遇到换行，输出当前行
+                            if let Some(mp) = &self.mp {
+                                let _ = mp.println(&line_buffer);
+                            } else {
+                                println!("{}", line_buffer);
+                            }
+                            line_buffer.clear();
+                        } else {
+                            line_buffer.push(ch);
+                        }
+                    }
                     full_response.push_str(&text.text);
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning))) => {
                     if !is_thinking {
-                        println!("\n💭 思考中:");
+                        flush_buffer(&self.mp, &mut line_buffer);
+                        output_line(&self.mp, "\n💭 思考中:");
                         is_thinking = true;
                     }
                     for r in reasoning.reasoning {
-                        print!("{}", r);
-                        let _ = std::io::stdout().flush();
+                        line_buffer.push_str(&r);
                     }
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
                     if !is_thinking {
-                        println!("\n💭 思考中:");
+                        flush_buffer(&self.mp, &mut line_buffer);
+                        output_line(&self.mp, "\n💭 思考中:");
                         is_thinking = true;
                     }
-                    print!("{}", reasoning);
-                    let _ = std::io::stdout().flush();
+                    line_buffer.push_str(&reasoning);
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall(tool_call))) => {
                     if is_thinking {
-                        println!("\n");
+                        flush_buffer(&self.mp, &mut line_buffer);
+                        output_line(&self.mp, "");
                         is_thinking = false;
                     }
-                    println!("\n🔧 调用工具: {}", tool_call.function.name);
+                    // 先刷新缓冲
+                    flush_buffer(&self.mp, &mut line_buffer);
+                    output_line(&self.mp, &format!(
+                        "\n{} 调用工具: {}",
+                        "🔧".bright_yellow(),
+                        tool_call.function.name.bright_cyan()
+                    ));
                 }
                 Ok(MultiTurnStreamItem::StreamUserItem(rig::streaming::StreamedUserContent::ToolResult(_))) => {
-                    println!("✓ 工具执行完成");
+                    output_line(&self.mp, &format!("{} 工具执行完成", "✓".green()));
                 }
                 Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
                     full_response = final_res.response().to_string();
@@ -249,7 +302,21 @@ impl RigAgentRunner {
             }
         }
 
-        println!(); // 换行
+        // 刷新剩余的缓冲内容
+        if !line_buffer.is_empty() {
+            if let Some(mp) = &self.mp {
+                let _ = mp.println(&line_buffer);
+            } else {
+                println!("{}", line_buffer);
+            }
+        }
+
+        // 输出换行
+        if let Some(mp) = &self.mp {
+            let _ = mp.println("");
+        } else {
+            println!();
+        }
 
         Ok(full_response)
     }
