@@ -49,12 +49,13 @@ impl StatusLine {
         bar.set_style(
             ProgressStyle::default_spinner()
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                .template("{spinner:.cyan} {msg}")
+                .template("{spinner:.cyan} {prefix}… (esc to interrupt · {elapsed} · ↓ {msg} tokens)")
                 .unwrap(),
         );
 
         // 立即显示初始状态
-        self.update_display(&bar, status, 0);
+        bar.set_prefix(status.bright_white().to_string());
+        bar.set_message("0");
         bar.enable_steady_tick(Duration::from_millis(100));
 
         self.status_bar = Some(bar);
@@ -72,21 +73,8 @@ impl StatusLine {
 
     /// 内部方法：更新显示
     fn update_display(&self, bar: &ProgressBar, status: &str, tokens: usize) {
-        let elapsed = self
-            .start_time
-            .map(|t| t.elapsed())
-            .unwrap_or(Duration::from_secs(0));
-
-        let elapsed_str = format_duration(elapsed);
-
-        let msg = format!(
-            "{}… (esc to interrupt · {} · ↓ {} tokens)",
-            status.bright_white(),
-            elapsed_str,
-            tokens
-        );
-
-        bar.set_message(msg);
+        bar.set_prefix(status.bright_white().to_string());
+        bar.set_message(tokens.to_string());
     }
 
     /// 完成任务
