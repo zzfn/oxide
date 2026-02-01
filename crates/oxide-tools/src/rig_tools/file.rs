@@ -12,7 +12,7 @@ use super::errors::FileError;
 // Read 工具
 
 /// Read 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ReadArgs {
     /// 文件路径
     pub file_path: String,
@@ -138,7 +138,7 @@ impl Tool for RigReadTool {
 // Write 工具
 
 /// Write 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WriteArgs {
     /// 文件路径
     pub file_path: String,
@@ -236,7 +236,7 @@ impl Tool for RigWriteTool {
 // Edit 工具
 
 /// Edit 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EditArgs {
     /// 文件路径
     pub file_path: String,

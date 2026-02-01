@@ -170,9 +170,9 @@ use oxide_core::config::PermissionsConfig;
 use oxide_tools::{ConfirmationCallback, ConfirmationResult, PermissionManager};
 
 // 创建确认回调
-let callback: ConfirmationCallback = Arc::new(|tool_name| {
+let callback: ConfirmationCallback = Arc::new(|tool_name, args| {
     Box::pin(async move {
-        // 显示确认对话框
+        // 显示确认对话框，可以使用 args 显示工具参数详情
         // 返回用户选择
         ConfirmationResult::AllowSession
     })

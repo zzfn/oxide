@@ -17,7 +17,7 @@ use super::errors::SearchError;
 // Glob 工具
 
 /// Glob 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GlobArgs {
     /// glob 模式，如 "**/*.js" 或 "src/**/*.ts"
     pub pattern: String,
@@ -143,7 +143,7 @@ impl Tool for RigGlobTool {
 // Grep 工具
 
 /// Grep 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GrepArgs {
     /// 要搜索的正则表达式模式
     pub pattern: String,

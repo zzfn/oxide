@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::task::{TaskError, TaskManager};
 
 /// TaskCreate 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskCreateArgs {
     /// 任务标题（祈使句）
     pub subject: String,

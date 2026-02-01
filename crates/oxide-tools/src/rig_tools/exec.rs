@@ -17,7 +17,7 @@ use crate::task::TaskManager;
 // Bash 工具
 
 /// Bash 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BashArgs {
     /// 要执行的命令
     pub command: String,
@@ -266,7 +266,7 @@ impl Tool for RigBashTool {
 // TaskOutput 工具
 
 /// TaskOutput 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskOutputArgs {
     /// 任务 ID
     pub task_id: String,
@@ -392,7 +392,7 @@ impl Tool for RigTaskOutputTool {
 // TaskStop 工具
 
 /// TaskStop 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskStopArgs {
     /// 任务 ID
     pub task_id: String,

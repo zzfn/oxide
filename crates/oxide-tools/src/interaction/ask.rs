@@ -30,7 +30,7 @@ pub enum QuestionType {
 }
 
 /// AskUserQuestion 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AskUserQuestionArgs {
     /// 问题文本
     pub question: String,

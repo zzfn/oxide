@@ -11,7 +11,7 @@ use uuid::Uuid;
 use super::manager::PlanManager;
 
 /// EnterPlanMode 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EnterPlanModeArgs {}
 
 /// EnterPlanMode 工具输出
@@ -66,14 +66,14 @@ impl Tool for RigEnterPlanModeTool {
 }
 
 /// 权限提示参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AllowedPromptArg {
     pub tool: String,
     pub prompt: String,
 }
 
 /// ExitPlanMode 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExitPlanModeArgs {
     /// 计划内容（Markdown 格式）
     pub plan_content: String,

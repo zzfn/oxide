@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::task::{TaskError, TaskManager, TaskStatus};
 
 /// TaskList 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskListArgs {
     // 目前不需要参数，但保留结构以便未来扩展
 }

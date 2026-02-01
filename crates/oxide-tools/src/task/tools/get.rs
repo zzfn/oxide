@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::task::{TaskError, TaskManager};
 
 /// TaskGet 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskGetArgs {
     /// 任务 ID
     #[serde(rename = "taskId")]

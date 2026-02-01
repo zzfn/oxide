@@ -24,8 +24,9 @@ pub enum ConfirmationResult {
 }
 
 /// 确认回调类型
+/// 参数：(工具名称, 工具参数的 JSON 表示)
 pub type ConfirmationCallback = Arc<
-    dyn Fn(String) -> Pin<Box<dyn Future<Output = ConfirmationResult> + Send>> + Send + Sync,
+    dyn Fn(String, serde_json::Value) -> Pin<Box<dyn Future<Output = ConfirmationResult> + Send>> + Send + Sync,
 >;
 
 /// 持久化回调类型 - 用于将工具添加到配置文件的 allow 列表
@@ -112,9 +113,9 @@ impl PermissionManager {
     /// 请求用户确认
     /// 返回 Ok(ConfirmationResult) 表示用户的选择
     /// 返回 Err 表示没有配置确认回调
-    pub async fn request_confirmation(&self, tool_name: &str) -> Result<ConfirmationResult, ()> {
+    pub async fn request_confirmation(&self, tool_name: &str, args: serde_json::Value) -> Result<ConfirmationResult, ()> {
         if let Some(callback) = &self.confirmation_callback {
-            let result = callback(tool_name.to_string()).await;
+            let result = callback(tool_name.to_string(), args).await;
             match result {
                 ConfirmationResult::Allow => {
                     // 仅本次允许，不记录

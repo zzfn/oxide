@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::task::{TaskError, TaskManager, TaskStatus};
 
 /// TaskUpdate 工具参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskUpdateArgs {
     /// 任务 ID
     #[serde(rename = "taskId")]

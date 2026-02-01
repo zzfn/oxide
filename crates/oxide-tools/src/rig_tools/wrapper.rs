@@ -68,6 +68,7 @@ impl<'de, T: Tool + Deserialize<'de>> Deserialize<'de> for ToolWrapper<T> {
 impl<T: Tool + Send + Sync> Tool for ToolWrapper<T>
 where
     T::Error: Send,
+    T::Args: serde::Serialize,
 {
     const NAME: &'static str = T::NAME;
 
@@ -100,7 +101,10 @@ where
 
                 // 2. 检查是否需要用户确认
                 if pm.requires_confirmation(T::NAME).await {
-                    match pm.request_confirmation(T::NAME).await {
+                    // 将参数序列化为 JSON
+                    let args_json = serde_json::to_value(&args).unwrap_or(serde_json::json!({}));
+
+                    match pm.request_confirmation(T::NAME, args_json).await {
                         Ok(ConfirmationResult::Allow)
                         | Ok(ConfirmationResult::AllowSession)
                         | Ok(ConfirmationResult::AllowAlways) => {
@@ -245,7 +249,7 @@ mod tests {
     async fn test_wrapper_user_approves_dangerous_tool() {
         // 用户同意执行危险工具
         let config = PermissionsConfig::default();
-        let callback: ConfirmationCallback = Arc::new(|_tool_name| {
+        let callback: ConfirmationCallback = Arc::new(|_tool_name, _args| {
             Box::pin(async move { ConfirmationResult::AllowSession })
         });
         let pm = PermissionManager::new(config).with_confirmation_callback(callback);
@@ -263,7 +267,7 @@ mod tests {
     async fn test_wrapper_user_rejects_dangerous_tool() {
         // 用户拒绝执行危险工具
         let config = PermissionsConfig::default();
-        let callback: ConfirmationCallback = Arc::new(|_tool_name| {
+        let callback: ConfirmationCallback = Arc::new(|_tool_name, _args| {
             Box::pin(async move { ConfirmationResult::Deny })
         });
         let pm = PermissionManager::new(config).with_confirmation_callback(callback);
@@ -319,7 +323,7 @@ mod tests {
         let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let call_count_clone = call_count.clone();
 
-        let callback: ConfirmationCallback = Arc::new(move |_tool_name| {
+        let callback: ConfirmationCallback = Arc::new(move |_tool_name, _args| {
             call_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Box::pin(async move { ConfirmationResult::AllowSession })
         });
