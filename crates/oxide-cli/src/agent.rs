@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::interaction::CliInteractionHandler;
-use crate::render::Renderer;
+use crate::render::{Renderer, StreamState};
 
 /// 创建 CLI 确认回调
 fn create_confirmation_callback(mp: Option<Arc<MultiProgress>>) -> oxide_tools::ConfirmationCallback {
@@ -222,32 +222,25 @@ impl RigAgentRunner {
         use rig::agent::MultiTurnStreamItem;
         use rig::streaming::StreamedAssistantContent;
         use futures::StreamExt;
-        use colored::Colorize;
-        use indicatif::{ProgressBar, ProgressStyle};
-        use std::time::Duration;
 
-        // 创建工具列表（boxed）
+        // 创建工具列表
         let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
             .task_manager(self.task_manager.clone())
             .permission_manager(self.permission_manager.clone())
             .build_boxed();
 
-        // 添加交互工具并设置处理器
+        // 添加交互工具
         let ask_tool = oxide_tools::rig_tools::RigAskUserQuestionTool::new();
         ask_tool.set_handler(Arc::new(CliInteractionHandler::new())).await;
         tools.push(Box::new(oxide_tools::rig_tools::ToolWrapper::new(ask_tool)));
 
-        // 创建 rig Agent
-        let agent = provider.create_agent_with_tools(
-            self.system_prompt.as_deref(),
-            tools,
-        );
+        // 创建 Agent
+        let agent = provider.create_agent_with_tools(self.system_prompt.as_deref(), tools);
 
-        // 构建完整的提示（包含历史上下文）
+        // 构建提示（包含历史上下文）
         let prompt = if chat_history.is_empty() {
             user_input.to_string()
         } else {
-            // 将历史消息转换为上下文字符串
             let history_context = self.format_chat_history(&chat_history);
             format!("{}\n\n用户: {}", history_context, user_input)
         };
@@ -255,137 +248,31 @@ impl RigAgentRunner {
         // 获取流式响应
         let mut stream = agent.stream_prompt(&prompt).multi_turn(10).await;
 
-        // 收集完整响应
+        // 创建流式渲染状态管理器
+        let mut state = StreamState::new(self.mp.clone(), self.statusline.clone());
         let mut full_response = String::new();
 
-        // 流式文本缓冲（用于按行输出）
-        let mut line_buffer = String::new();
-        let mut is_thinking = false;
-        // 当前工具执行的进度条和工具信息
-        let mut current_tool_bar: Option<ProgressBar> = None;
-        let mut current_tool_info: Option<String> = None;
-
-        // 辅助函数：输出文本（通过 MultiProgress 或直接输出）
-        let output_line = |mp: &Option<Arc<MultiProgress>>, text: &str| {
-            if let Some(mp) = mp {
-                let _ = mp.println(text);
-            } else {
-                println!("{}", text);
-            }
-        };
-
-        // 辅助函数：刷新行缓冲
-        let flush_buffer = |mp: &Option<Arc<MultiProgress>>, buffer: &mut String| {
-            if !buffer.is_empty() {
-                if let Some(mp) = mp {
-                    let _ = mp.println(buffer.as_str());
-                } else {
-                    println!("{}", buffer);
-                }
-                buffer.clear();
-            }
-        };
-
+        // 处理流式响应
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
-                    if is_thinking {
-                        flush_buffer(&self.mp, &mut line_buffer);
-                        output_line(&self.mp, "");
-                        is_thinking = false;
-                    }
-                    // 处理流式文本：按行输出
-                    for ch in text.text.chars() {
-                        if ch == '\n' {
-                            // 遇到换行，输出当前行
-                            if let Some(mp) = &self.mp {
-                                let _ = mp.println(&line_buffer);
-                            } else {
-                                println!("{}", line_buffer);
-                            }
-                            line_buffer.clear();
-                        } else {
-                            line_buffer.push(ch);
-                        }
-                    }
+                    state.handle_text(&text.text);
                     full_response.push_str(&text.text);
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning))) => {
-                    if !is_thinking {
-                        flush_buffer(&self.mp, &mut line_buffer);
-                        output_line(&self.mp, "\n💭 思考中:");
-                        is_thinking = true;
-                    }
                     for r in reasoning.reasoning {
-                        line_buffer.push_str(&r);
+                        state.handle_reasoning(&r);
                     }
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
-                    if !is_thinking {
-                        flush_buffer(&self.mp, &mut line_buffer);
-                        output_line(&self.mp, "\n💭 思考中:");
-                        is_thinking = true;
-                    }
-                    line_buffer.push_str(&reasoning);
+                    state.handle_reasoning(&reasoning);
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall(tool_call))) => {
-                    if is_thinking {
-                        flush_buffer(&self.mp, &mut line_buffer);
-                        output_line(&self.mp, "");
-                        is_thinking = false;
-                    }
-                    // 先刷新缓冲
-                    flush_buffer(&self.mp, &mut line_buffer);
-
-                    // 隐藏 statusline（工具执行期间不显示）
-                    if let Some(ref sl) = self.statusline {
-                        sl.suspend();
-                    }
-
-                    // 从参数中提取关键信息作为描述
                     let desc = extract_tool_description(&tool_call.function.name, &tool_call.function.arguments);
-                    let tool_info = format!("{}({})", tool_call.function.name, desc);
-
-                    // 创建进度条显示工具执行状态
-                    let bar = if let Some(mp) = &self.mp {
-                        let b = mp.add(ProgressBar::new_spinner());
-                        b.set_style(
-                            ProgressStyle::default_spinner()
-                                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                                .template("{spinner:.dim} {msg}")
-                                .unwrap(),
-                        );
-                        b.set_message(format!("{} {}", "⏺".bright_black(), tool_info.clone()));
-                        b.enable_steady_tick(Duration::from_millis(80));
-                        b
-                    } else {
-                        let b = ProgressBar::new_spinner();
-                        b.set_style(
-                            ProgressStyle::default_spinner()
-                                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                                .template("{spinner:.dim} {msg}")
-                                .unwrap(),
-                        );
-                        b.set_message(format!("{} {}", "⏺".bright_black(), tool_info.clone()));
-                        b.enable_steady_tick(Duration::from_millis(80));
-                        b
-                    };
-                    current_tool_bar = Some(bar);
-                    current_tool_info = Some(tool_info);
+                    state.start_tool(&tool_call.function.name, desc);
                 }
                 Ok(MultiTurnStreamItem::StreamUserItem(rig::streaming::StreamedUserContent::ToolResult(_))) => {
-                    // 完成工具执行：清除进度条，输出永久文本
-                    if let Some(bar) = current_tool_bar.take() {
-                        bar.finish_and_clear();
-                    }
-                    if let Some(info) = current_tool_info.take() {
-                        let finished_msg = format!("{} {}", "⏺".green(), info);
-                        output_line(&self.mp, &finished_msg);
-                    }
-                    // 恢复 statusline
-                    if let Some(ref sl) = self.statusline {
-                        sl.resume();
-                    }
+                    state.finish_tool();
                 }
                 Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
                     full_response = final_res.response().to_string();
@@ -397,22 +284,7 @@ impl RigAgentRunner {
             }
         }
 
-        // 刷新剩余的缓冲内容
-        if !line_buffer.is_empty() {
-            if let Some(mp) = &self.mp {
-                let _ = mp.println(&line_buffer);
-            } else {
-                println!("{}", line_buffer);
-            }
-        }
-
-        // 输出换行
-        if let Some(mp) = &self.mp {
-            let _ = mp.println("");
-        } else {
-            println!();
-        }
-
+        state.finish();
         Ok(full_response)
     }
 

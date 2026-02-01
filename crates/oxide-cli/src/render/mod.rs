@@ -6,12 +6,14 @@ pub mod markdown;
 pub mod spinner;
 pub mod statusline;
 pub mod stream;
+pub mod stream_state;
 pub mod tool_status;
 
 pub use markdown::MarkdownRenderer;
 pub use spinner::Spinner;
 pub use statusline::StatusLine;
 pub use stream::{StreamChannel, StreamRenderer};
+pub use stream_state::StreamState;
 pub use tool_status::{ToolStatus, ToolStatusDisplay};
 
 use colored::Colorize;
