@@ -4,17 +4,14 @@
 
 use crate::permission::{ConfirmationResult, PermissionManager};
 use crate::rig_tools::errors::{PermissionError, WrappedError};
-use colored::Colorize;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
-use std::io::Write;
 
 /// 工具包装器 - 添加进度显示和权限检查
 pub struct ToolWrapper<T: Tool> {
     inner: T,
-    show_progress: bool,
     permission_manager: Option<PermissionManager>,
 }
 
@@ -23,15 +20,8 @@ impl<T: Tool> ToolWrapper<T> {
     pub fn new(tool: T) -> Self {
         Self {
             inner: tool,
-            show_progress: true,
             permission_manager: None,
         }
-    }
-
-    /// 设置是否显示进度
-    pub fn with_progress(mut self, show: bool) -> Self {
-        self.show_progress = show;
-        self
     }
 
     /// 设置权限管理器
@@ -47,7 +37,6 @@ impl<T: Tool + Clone> Clone for ToolWrapper<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            show_progress: self.show_progress,
             permission_manager: self.permission_manager.clone(),
         }
     }
@@ -71,7 +60,6 @@ impl<'de, T: Tool + Deserialize<'de>> Deserialize<'de> for ToolWrapper<T> {
     {
         Ok(Self {
             inner: T::deserialize(deserializer)?,
-            show_progress: true,
             permission_manager: None,
         })
     }
@@ -99,21 +87,12 @@ where
         args: Self::Args,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         let permission_manager = self.permission_manager.clone();
-        let show_progress = self.show_progress;
 
         async move {
             // 权限检查
             if let Some(pm) = &permission_manager {
                 // 1. 检查工具是否被明确拒绝
                 if pm.is_denied(T::NAME).await {
-                    if show_progress {
-                        println!(
-                            "  {} 工具 {} 被权限配置禁止",
-                            "🚫".red(),
-                            T::NAME.bright_cyan()
-                        );
-                        let _ = std::io::stdout().flush();
-                    }
                     return Err(WrappedError::Permission(PermissionError::ToolDenied(
                         T::NAME.to_string(),
                     )));
@@ -126,39 +105,15 @@ where
                         | Ok(ConfirmationResult::AllowSession)
                         | Ok(ConfirmationResult::AllowAlways) => {
                             // 用户同意，继续执行
-                            if show_progress {
-                                println!(
-                                    "  {} 用户已授权执行工具 {}",
-                                    "✓".green(),
-                                    T::NAME.bright_cyan()
-                                );
-                                let _ = std::io::stdout().flush();
-                            }
                         }
                         Ok(ConfirmationResult::Deny) => {
                             // 用户拒绝
-                            if show_progress {
-                                println!(
-                                    "  {} 用户拒绝执行工具 {}",
-                                    "🚫".red(),
-                                    T::NAME.bright_cyan()
-                                );
-                                let _ = std::io::stdout().flush();
-                            }
                             return Err(WrappedError::Permission(PermissionError::UserRejected(
                                 T::NAME.to_string(),
                             )));
                         }
                         Err(()) => {
                             // 没有配置确认回调
-                            if show_progress {
-                                println!(
-                                    "  {} 工具 {} 需要用户确认，但未配置确认处理器",
-                                    "⚠".yellow(),
-                                    T::NAME.bright_cyan()
-                                );
-                                let _ = std::io::stdout().flush();
-                            }
                             return Err(WrappedError::Permission(
                                 PermissionError::NoConfirmationHandler(T::NAME.to_string()),
                             ));
@@ -167,36 +122,8 @@ where
                 }
             }
 
-            // 显示开始
-            if show_progress {
-                println!(
-                    "  {} 执行工具: {}",
-                    "⚙".bright_yellow(),
-                    T::NAME.bright_cyan()
-                );
-                let _ = std::io::stdout().flush();
-            }
-
             // 执行工具
             let result = self.inner.call(args).await;
-
-            // 显示结果
-            if show_progress {
-                match &result {
-                    Ok(_) => println!(
-                        "  {} 工具 {} 执行成功",
-                        "✓".green(),
-                        T::NAME.bright_cyan()
-                    ),
-                    Err(e) => println!(
-                        "  {} 工具 {} 执行失败: {:?}",
-                        "✗".red(),
-                        T::NAME.bright_cyan(),
-                        e
-                    ),
-                }
-                let _ = std::io::stdout().flush();
-            }
 
             result.map_err(WrappedError::Inner)
         }
@@ -266,7 +193,7 @@ mod tests {
     async fn test_wrapper_without_permission_manager() {
         // 没有权限管理器时，工具应该正常执行
         let tool = MockEditTool;
-        let wrapper = ToolWrapper::new(tool).with_progress(false);
+        let wrapper = ToolWrapper::new(tool);
 
         let result = wrapper.call(json!({})).await;
         assert!(result.is_ok());
@@ -282,7 +209,6 @@ mod tests {
         let pm = PermissionManager::new(config);
         let tool = MockEditTool;
         let wrapper = ToolWrapper::new(tool)
-            .with_progress(false)
             .with_permission_manager(pm);
 
         let result = wrapper.call(json!({})).await;
@@ -303,7 +229,6 @@ mod tests {
 
         let tool = MockEditTool;
         let wrapper = ToolWrapper::new(tool)
-            .with_progress(false)
             .with_permission_manager(pm);
 
         let result = wrapper.call(json!({})).await;
@@ -327,7 +252,6 @@ mod tests {
 
         let tool = MockEditTool;
         let wrapper = ToolWrapper::new(tool)
-            .with_progress(false)
             .with_permission_manager(pm);
 
         let result = wrapper.call(json!({})).await;
@@ -346,7 +270,6 @@ mod tests {
 
         let tool = MockEditTool;
         let wrapper = ToolWrapper::new(tool)
-            .with_progress(false)
             .with_permission_manager(pm);
 
         let result = wrapper.call(json!({})).await;
@@ -367,7 +290,6 @@ mod tests {
 
         let tool = MockReadTool;
         let wrapper = ToolWrapper::new(tool)
-            .with_progress(false)
             .with_permission_manager(pm);
 
         let result = wrapper.call(json!({})).await;
@@ -383,7 +305,6 @@ mod tests {
 
         let tool = MockEditTool;
         let wrapper = ToolWrapper::new(tool)
-            .with_progress(false)
             .with_permission_manager(pm);
 
         let result = wrapper.call(json!({})).await;
@@ -406,7 +327,6 @@ mod tests {
 
         let tool = MockEditTool;
         let wrapper = ToolWrapper::new(tool)
-            .with_progress(false)
             .with_permission_manager(pm);
 
         // 第一次调用

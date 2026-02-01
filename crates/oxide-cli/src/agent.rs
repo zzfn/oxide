@@ -73,6 +73,8 @@ fn create_permission_manager(config: PermissionsConfig) -> PermissionManager {
         .with_persist_callback(create_persist_callback())
 }
 
+use indicatif::ProgressBar as IndicatifProgressBar;
+
 /// 基于 rig 的代理
 pub struct RigAgentRunner {
     /// 工作目录
@@ -85,6 +87,8 @@ pub struct RigAgentRunner {
     system_prompt: Option<String>,
     /// MultiProgress 管理器（用于输出）
     mp: Option<Arc<MultiProgress>>,
+    /// Statusline 的 ProgressBar（用于 insert_before）
+    statusline_bar: Option<IndicatifProgressBar>,
 }
 
 impl RigAgentRunner {
@@ -96,6 +100,7 @@ impl RigAgentRunner {
             permission_manager: create_permission_manager(PermissionsConfig::default()),
             system_prompt: None,
             mp: None,
+            statusline_bar: None,
         }
     }
 
@@ -107,6 +112,7 @@ impl RigAgentRunner {
             permission_manager: create_permission_manager(config),
             system_prompt: None,
             mp: None,
+            statusline_bar: None,
         }
     }
 
@@ -131,6 +137,12 @@ impl RigAgentRunner {
     /// 设置权限管理器
     pub fn with_permission_manager(mut self, permission_manager: PermissionManager) -> Self {
         self.permission_manager = permission_manager;
+        self
+    }
+
+    /// 设置 statusline 的 ProgressBar（用于 insert_before）
+    pub fn with_statusline_bar(mut self, bar: IndicatifProgressBar) -> Self {
+        self.statusline_bar = Some(bar);
         self
     }
 
@@ -194,6 +206,8 @@ impl RigAgentRunner {
         use rig::streaming::StreamedAssistantContent;
         use futures::StreamExt;
         use colored::Colorize;
+        use indicatif::{ProgressBar, ProgressStyle};
+        use std::time::Duration;
 
         // 创建工具列表（boxed）
         let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(self.working_dir.clone())
@@ -230,6 +244,8 @@ impl RigAgentRunner {
         // 流式文本缓冲（用于按行输出）
         let mut line_buffer = String::new();
         let mut is_thinking = false;
+        // 当前工具执行的进度条
+        let mut current_tool_bar: Option<ProgressBar> = None;
 
         // 辅助函数：输出文本（通过 MultiProgress 或直接输出）
         let output_line = |mp: &Option<Arc<MultiProgress>>, text: &str| {
@@ -302,14 +318,51 @@ impl RigAgentRunner {
                     }
                     // 先刷新缓冲
                     flush_buffer(&self.mp, &mut line_buffer);
-                    output_line(&self.mp, &format!(
-                        "\n{} 调用工具: {}",
-                        "🔧".bright_yellow(),
-                        tool_call.function.name.bright_cyan()
-                    ));
+
+                    // 从参数中提取关键信息作为描述
+                    let desc = extract_tool_description(&tool_call.function.name, &tool_call.function.arguments);
+                    let tool_info = format!("{}({})", tool_call.function.name, desc);
+
+                    // 创建进度条显示工具执行状态
+                    let bar = if let Some(mp) = &self.mp {
+                        // 如果有 statusline bar，使用 insert_before 确保工具进度条在 statusline 上方
+                        let b = if let Some(ref status_bar) = self.statusline_bar {
+                            mp.insert_before(status_bar, ProgressBar::new_spinner())
+                        } else {
+                            mp.add(ProgressBar::new_spinner())
+                        };
+                        b.set_style(
+                            ProgressStyle::default_spinner()
+                                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                                .template("{spinner:.dim} {msg}")
+                                .unwrap(),
+                        );
+                        b.set_message(format!("{} {}", "⏺".bright_black(), tool_info));
+                        b.enable_steady_tick(Duration::from_millis(80));
+                        b
+                    } else {
+                        let b = ProgressBar::new_spinner();
+                        b.set_style(
+                            ProgressStyle::default_spinner()
+                                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                                .template("{spinner:.dim} {msg}")
+                                .unwrap(),
+                        );
+                        b.set_message(format!("{} {}", "⏺".bright_black(), tool_info));
+                        b.enable_steady_tick(Duration::from_millis(80));
+                        b
+                    };
+                    current_tool_bar = Some(bar);
                 }
                 Ok(MultiTurnStreamItem::StreamUserItem(rig::streaming::StreamedUserContent::ToolResult(_))) => {
-                    output_line(&self.mp, &format!("{} 工具执行完成", "✓".green()));
+                    // 完成工具执行，更新进度条为绿色圆点
+                    if let Some(bar) = current_tool_bar.take() {
+                        bar.set_style(ProgressStyle::default_bar().template("{msg}").unwrap());
+                        let current_msg = bar.message();
+                        // 替换灰色圆点为绿色圆点
+                        let finished_msg = current_msg.replacen("⏺", &format!("{}", "⏺".green()), 1);
+                        bar.finish_with_message(finished_msg);
+                    }
                 }
                 Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
                     full_response = final_res.response().to_string();
@@ -448,4 +501,85 @@ pub fn create_tool_registry(working_dir: PathBuf) -> Arc<ToolRegistry> {
     registry.register(Arc::new(oxide_tools::TaskStopTool::new(task_manager)));
 
     Arc::new(registry)
+}
+
+/// 从工具参数中提取关键描述信息
+fn extract_tool_description(tool_name: &str, args: &serde_json::Value) -> String {
+    match tool_name {
+        "Read" => {
+            // 提取文件路径
+            args.get("file_path")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_path(s))
+                .unwrap_or_default()
+        }
+        "Write" => {
+            args.get("file_path")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_path(s))
+                .unwrap_or_default()
+        }
+        "Edit" => {
+            args.get("file_path")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_path(s))
+                .unwrap_or_default()
+        }
+        "Glob" => {
+            args.get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        }
+        "Grep" => {
+            args.get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        }
+        "Bash" => {
+            // 提取命令，截断过长的命令
+            args.get("command")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 60))
+                .unwrap_or_default()
+        }
+        "TaskOutput" | "TaskStop" => {
+            args.get("task_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        }
+        "AskUserQuestion" => {
+            // 提取第一个问题
+            args.get("questions")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|q| q.get("question"))
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 40))
+                .unwrap_or_default()
+        }
+        _ => String::new(),
+    }
+}
+
+/// 截断路径，保留文件名和部分目录
+fn truncate_path(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() <= 3 {
+        path.to_string()
+    } else {
+        // 保留最后 3 个部分
+        format!(".../{}", parts[parts.len() - 3..].join("/"))
+    }
+}
+
+/// 截断字符串
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
+    }
 }
