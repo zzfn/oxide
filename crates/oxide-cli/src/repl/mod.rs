@@ -188,14 +188,10 @@ impl Repl {
         };
 
         // 创建 Agent Runner（使用配置的权限）
-        let mut agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config)
+        let agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config)
             .with_multi_progress(self.renderer.multi_progress().clone())
-            .with_system_prompt(&system_prompt);
-
-        // 如果有 statusline bar，传递给 agent runner
-        if let Some(bar) = self.renderer.statusline_mut().bar() {
-            agent_runner = agent_runner.with_statusline_bar(bar.clone());
-        }
+            .with_system_prompt(&system_prompt)
+            .with_statusline(self.renderer.statusline_mut().clone());
 
         // 显示助手响应头部
         self.renderer.assistant_header();

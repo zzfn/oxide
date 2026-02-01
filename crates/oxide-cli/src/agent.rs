@@ -16,8 +16,9 @@ use crate::interaction::CliInteractionHandler;
 use crate::render::Renderer;
 
 /// 创建 CLI 确认回调
-fn create_confirmation_callback() -> oxide_tools::ConfirmationCallback {
-    Arc::new(|tool_name: String| {
+fn create_confirmation_callback(mp: Option<Arc<MultiProgress>>) -> oxide_tools::ConfirmationCallback {
+    Arc::new(move |tool_name: String| {
+        let mp = mp.clone();
         Box::pin(async move {
             use dialoguer::{theme::ColorfulTheme, Select};
 
@@ -31,18 +32,27 @@ fn create_confirmation_callback() -> oxide_tools::ConfirmationCallback {
                 "拒绝",
             ];
 
-            match Select::with_theme(&theme)
-                .with_prompt(&prompt)
-                .items(&items)
-                .default(0)
-                .interact()
-            {
-                Ok(0) => ConfirmationResult::Allow,
-                Ok(1) => ConfirmationResult::AllowSession,
-                Ok(2) => ConfirmationResult::AllowAlways,
-                Ok(3) => ConfirmationResult::Deny,
-                Ok(_) => ConfirmationResult::Deny,
-                Err(_) => ConfirmationResult::Deny, // 出错时默认拒绝
+            let do_select = || {
+                match Select::with_theme(&theme)
+                    .with_prompt(&prompt)
+                    .items(&items)
+                    .default(0)
+                    .interact()
+                {
+                    Ok(0) => ConfirmationResult::Allow,
+                    Ok(1) => ConfirmationResult::AllowSession,
+                    Ok(2) => ConfirmationResult::AllowAlways,
+                    Ok(3) => ConfirmationResult::Deny,
+                    Ok(_) => ConfirmationResult::Deny,
+                    Err(_) => ConfirmationResult::Deny,
+                }
+            };
+
+            // 如果有 MultiProgress，暂停所有进度条后再显示确认对话框
+            if let Some(mp) = mp {
+                mp.suspend(do_select)
+            } else {
+                do_select()
             }
         })
     })
@@ -67,13 +77,13 @@ fn create_persist_callback() -> oxide_tools::PersistCallback {
 }
 
 /// 创建权限管理器
-fn create_permission_manager(config: PermissionsConfig) -> PermissionManager {
+fn create_permission_manager(config: PermissionsConfig, mp: Option<Arc<MultiProgress>>) -> PermissionManager {
     PermissionManager::new(config)
-        .with_confirmation_callback(create_confirmation_callback())
+        .with_confirmation_callback(create_confirmation_callback(mp))
         .with_persist_callback(create_persist_callback())
 }
 
-use indicatif::ProgressBar as IndicatifProgressBar;
+use crate::render::StatusLine;
 
 /// 基于 rig 的代理
 pub struct RigAgentRunner {
@@ -83,24 +93,28 @@ pub struct RigAgentRunner {
     task_manager: TaskManager,
     /// 权限管理器
     permission_manager: PermissionManager,
+    /// 权限配置（用于重新创建 permission_manager）
+    permissions_config: PermissionsConfig,
     /// 系统提示词
     system_prompt: Option<String>,
     /// MultiProgress 管理器（用于输出）
     mp: Option<Arc<MultiProgress>>,
-    /// Statusline 的 ProgressBar（用于 insert_before）
-    statusline_bar: Option<IndicatifProgressBar>,
+    /// Statusline（用于工具执行期间隐藏/恢复）
+    statusline: Option<StatusLine>,
 }
 
 impl RigAgentRunner {
     /// 创建新的代理运行器
     pub fn new(working_dir: PathBuf) -> Self {
+        let config = PermissionsConfig::default();
         Self {
             working_dir,
             task_manager: oxide_tools::rig_tools::create_task_manager(),
-            permission_manager: create_permission_manager(PermissionsConfig::default()),
+            permission_manager: create_permission_manager(config.clone(), None),
+            permissions_config: config,
             system_prompt: None,
             mp: None,
-            statusline_bar: None,
+            statusline: None,
         }
     }
 
@@ -109,10 +123,11 @@ impl RigAgentRunner {
         Self {
             working_dir,
             task_manager: oxide_tools::rig_tools::create_task_manager(),
-            permission_manager: create_permission_manager(config),
+            permission_manager: create_permission_manager(config.clone(), None),
+            permissions_config: config,
             system_prompt: None,
             mp: None,
-            statusline_bar: None,
+            statusline: None,
         }
     }
 
@@ -124,6 +139,8 @@ impl RigAgentRunner {
 
     /// 设置 MultiProgress 管理器（用于输出）
     pub fn with_multi_progress(mut self, mp: Arc<MultiProgress>) -> Self {
+        // 重新创建 permission_manager 以传入 mp
+        self.permission_manager = create_permission_manager(self.permissions_config.clone(), Some(mp.clone()));
         self.mp = Some(mp);
         self
     }
@@ -140,9 +157,9 @@ impl RigAgentRunner {
         self
     }
 
-    /// 设置 statusline 的 ProgressBar（用于 insert_before）
-    pub fn with_statusline_bar(mut self, bar: IndicatifProgressBar) -> Self {
-        self.statusline_bar = Some(bar);
+    /// 设置 statusline（用于工具执行期间隐藏/恢复）
+    pub fn with_statusline(mut self, statusline: StatusLine) -> Self {
+        self.statusline = Some(statusline);
         self
     }
 
@@ -320,18 +337,18 @@ impl RigAgentRunner {
                     // 先刷新缓冲
                     flush_buffer(&self.mp, &mut line_buffer);
 
+                    // 隐藏 statusline（工具执行期间不显示）
+                    if let Some(ref sl) = self.statusline {
+                        sl.suspend();
+                    }
+
                     // 从参数中提取关键信息作为描述
                     let desc = extract_tool_description(&tool_call.function.name, &tool_call.function.arguments);
                     let tool_info = format!("{}({})", tool_call.function.name, desc);
 
                     // 创建进度条显示工具执行状态
                     let bar = if let Some(mp) = &self.mp {
-                        // 如果有 statusline bar，使用 insert_before 确保工具进度条在 statusline 上方
-                        let b = if let Some(ref status_bar) = self.statusline_bar {
-                            mp.insert_before(status_bar, ProgressBar::new_spinner())
-                        } else {
-                            mp.add(ProgressBar::new_spinner())
-                        };
+                        let b = mp.add(ProgressBar::new_spinner());
                         b.set_style(
                             ProgressStyle::default_spinner()
                                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
@@ -364,6 +381,10 @@ impl RigAgentRunner {
                     if let Some(info) = current_tool_info.take() {
                         let finished_msg = format!("{} {}", "⏺".green(), info);
                         output_line(&self.mp, &finished_msg);
+                    }
+                    // 恢复 statusline
+                    if let Some(ref sl) = self.statusline {
+                        sl.resume();
                     }
                 }
                 Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
