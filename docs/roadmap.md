@@ -52,7 +52,7 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 - [x] 用户友好的错误消息
 
 #### 0.4 日志系统
-- [ ] 集成 `tracing` 框架
+- [x] 集成 `tracing` 框架
 - [ ] 结构化日志输出
 - [ ] 调试模式支持
 
@@ -160,7 +160,7 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 
 **目标**: 实现代理系统和高级交互功能
 
-**当前状态**: ⏳ 未开始（基础结构已搭建）
+**当前状态**: 🚧 进行中（任务管理、计划模式、用户交互已完成）
 
 #### 3.1 子代理系统 (Task Tool)
 - [ ] 定义子代理类型和能力
@@ -205,9 +205,9 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 
 #### 3.4 用户交互
 - [x] **AskUserQuestion**: 询问用户
-  - 单选/多选支持
-  - 选项推荐
-  - 自定义输入
+  - [x] 单选/多选支持
+  - [x] 选项推荐
+  - [x] 自定义输入
 
 ---
 
@@ -242,9 +242,12 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 #### 4.4 快捷命令
 - [x] `/help`: 帮助信息
 - [x] `/clear`: 清空会话
-- [ ] `/compact`: 压缩上下文
-- [ ] `/tasks`: 任务列表
-- [ ] `/config`: 配置管理
+- [ ] `/compact`: 压缩上下文（已实现命令但功能未完成）
+- [x] `/tasks`: 任务列表
+- [x] `/config`: 配置管理
+- [x] `/mode`: 模式切换
+- [x] `/tools`: 工具列表
+- [x] `/reload-config`: 重载配置
 
 #### 4.5 环境上下文注入
 - [ ] Git 状态自动注入
@@ -561,9 +564,10 @@ oxide/
   - 支持自定义 Base URL (OXIDE_BASE_URL) 和 API Key (OXIDE_AUTH_TOKEN)
   - 消息类型、工具调用格式、多模态内容支持已完成
 
-- **Phase 4 (CLI 界面)**: 85% 完成
+- **Phase 4 (CLI 界面)**: 90% 完成
   - Reedline 编辑器、命令系统、渲染器、状态栏已完成
-  - 待完成: 部分快捷命令 (/compact, /tasks, /config)
+  - 快捷命令已完成 (/help, /clear, /tasks, /config, /mode, /tools, /reload-config)
+  - 待完成: /compact 功能实现、环境上下文注入
 
 ### 🚧 进行中
 - **Phase 2 (核心工具)**: 95% 完成
@@ -574,14 +578,15 @@ oxide/
   - 代理主循环已完成（工具调用、流式输出）
   - 待完成: 网页获取 (WebFetch)
 
-- **Phase 3 (高级功能)**: 50% 完成
+- **Phase 3 (高级功能)**: 70% 完成
   - 任务管理系统已完成 (TaskCreate, TaskList, TaskGet, TaskUpdate)
   - 任务依赖关系管理和循环依赖检测已完成
   - 计划模式已完成 (EnterPlanMode, ExitPlanMode, 权限请求系统)
-  - 待完成: 子代理系统、用户交互工具完善
+  - 用户交互已完成 (AskUserQuestion)
+  - 待完成: 子代理系统
 
 ### ⏳ 未开始
-- **Phase 3 (高级功能 - 剩余部分)**: 子代理系统、计划模式、用户交互
+- **Phase 3 (高级功能 - 剩余部分)**: 子代理系统
 - **Phase 5 (Git 集成)**: Git 操作、GitHub 集成
 - **Phase 6 (扩展功能)**: 技能系统、MCP 支持、IDE 集成
 - **Phase 7 (优化完善)**: 性能优化、测试、文档、安全性
@@ -595,12 +600,14 @@ oxide/
 6. ✅ ~~实现任务管理系统 (TaskCreate, TaskList, TaskGet, TaskUpdate)~~
 7. ✅ ~~实现计划模式 (EnterPlanMode, ExitPlanMode)~~
 8. ✅ ~~实现权限系统持久化~~
-9. 实现网页工具 (WebFetch, WebSearch)
-10. 实现子代理系统 (Task Tool)
-11. 实现 Hooks 系统
-12. 实现自动摘要和上下文管理
-13. 实现环境上下文注入
-14. 端到端测试和优化
+9. ✅ ~~实现用户交互工具 (AskUserQuestion)~~
+10. ✅ ~~实现快捷命令 (/tasks, /config, /mode, /tools)~~
+11. 实现网页工具 (WebFetch, WebSearch)
+12. 实现子代理系统 (Task Tool)
+13. 实现 Hooks 系统
+14. 实现自动摘要和上下文管理
+15. 实现环境上下文注入
+16. 端到端测试和优化
 
 ### 📌 新发现的功能差距
 以下功能在原 roadmap 中未列出，但在 Claude Code 中存在：
