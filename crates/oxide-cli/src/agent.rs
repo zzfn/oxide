@@ -17,13 +17,20 @@ use crate::render::{Renderer, StreamState};
 
 /// 创建 CLI 确认回调
 fn create_confirmation_callback(mp: Option<Arc<MultiProgress>>) -> oxide_tools::ConfirmationCallback {
-    Arc::new(move |tool_name: String| {
+    Arc::new(move |tool_name: String, args: serde_json::Value| {
         let mp = mp.clone();
         Box::pin(async move {
             use dialoguer::{theme::ColorfulTheme, Select};
 
             let theme = ColorfulTheme::default();
-            let prompt = format!("工具 '{}' 需要权限确认", tool_name);
+
+            // 提取工具参数的关键信息
+            let detail = extract_tool_detail(&tool_name, &args);
+            let prompt = if detail.is_empty() {
+                format!("工具 '{}' 需要权限确认", tool_name)
+            } else {
+                format!("工具 '{}' 需要权限确认\n  {}", tool_name, detail)
+            };
 
             let items = vec![
                 "允许本次",
@@ -56,6 +63,34 @@ fn create_confirmation_callback(mp: Option<Arc<MultiProgress>>) -> oxide_tools::
             }
         })
     })
+}
+
+/// 从工具参数中提取关键信息用于显示
+fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> String {
+    match tool_name {
+        "Bash" => {
+            args.get("command")
+                .and_then(|v| v.as_str())
+                .map(|cmd| format!("命令: {}", truncate_str(cmd, 80)))
+                .unwrap_or_default()
+        }
+        "Edit" | "Write" | "Read" => {
+            args.get("file_path")
+                .and_then(|v| v.as_str())
+                .map(|path| format!("文件: {}", path))
+                .unwrap_or_default()
+        }
+        _ => String::new(),
+    }
+}
+
+/// 截断字符串
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
+    }
 }
 
 /// 创建持久化回调
@@ -467,14 +502,5 @@ fn truncate_path(path: &str) -> String {
     } else {
         // 保留最后 3 个部分
         format!(".../{}", parts[parts.len() - 3..].join("/"))
-    }
-}
-
-/// 截断字符串
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len])
     }
 }
