@@ -244,8 +244,9 @@ impl RigAgentRunner {
         // 流式文本缓冲（用于按行输出）
         let mut line_buffer = String::new();
         let mut is_thinking = false;
-        // 当前工具执行的进度条
+        // 当前工具执行的进度条和工具信息
         let mut current_tool_bar: Option<ProgressBar> = None;
+        let mut current_tool_info: Option<String> = None;
 
         // 辅助函数：输出文本（通过 MultiProgress 或直接输出）
         let output_line = |mp: &Option<Arc<MultiProgress>>, text: &str| {
@@ -337,7 +338,7 @@ impl RigAgentRunner {
                                 .template("{spinner:.dim} {msg}")
                                 .unwrap(),
                         );
-                        b.set_message(format!("{} {}", "⏺".bright_black(), tool_info));
+                        b.set_message(format!("{} {}", "⏺".bright_black(), tool_info.clone()));
                         b.enable_steady_tick(Duration::from_millis(80));
                         b
                     } else {
@@ -348,20 +349,21 @@ impl RigAgentRunner {
                                 .template("{spinner:.dim} {msg}")
                                 .unwrap(),
                         );
-                        b.set_message(format!("{} {}", "⏺".bright_black(), tool_info));
+                        b.set_message(format!("{} {}", "⏺".bright_black(), tool_info.clone()));
                         b.enable_steady_tick(Duration::from_millis(80));
                         b
                     };
                     current_tool_bar = Some(bar);
+                    current_tool_info = Some(tool_info);
                 }
                 Ok(MultiTurnStreamItem::StreamUserItem(rig::streaming::StreamedUserContent::ToolResult(_))) => {
-                    // 完成工具执行，更新进度条为绿色圆点
+                    // 完成工具执行：清除进度条，输出永久文本
                     if let Some(bar) = current_tool_bar.take() {
-                        bar.set_style(ProgressStyle::default_bar().template("{msg}").unwrap());
-                        let current_msg = bar.message();
-                        // 替换灰色圆点为绿色圆点
-                        let finished_msg = current_msg.replacen("⏺", &format!("{}", "⏺".green()), 1);
-                        bar.finish_with_message(finished_msg);
+                        bar.finish_and_clear();
+                    }
+                    if let Some(info) = current_tool_info.take() {
+                        let finished_msg = format!("{} {}", "⏺".green(), info);
+                        output_line(&self.mp, &finished_msg);
                     }
                 }
                 Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
