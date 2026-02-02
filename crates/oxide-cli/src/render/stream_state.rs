@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::StatusLine;
+use crate::utils;
 
 /// 流式渲染状态
 pub struct StreamState {
@@ -23,6 +24,10 @@ pub struct StreamState {
     current_tool_bar: Option<ProgressBar>,
     /// 当前工具信息（用于完成时输出）
     current_tool_info: Option<String>,
+    /// Token 计数
+    token_count: usize,
+    /// 文本累积（用于计算 token）
+    accumulated_text: String,
 }
 
 impl StreamState {
@@ -35,6 +40,8 @@ impl StreamState {
             is_thinking: false,
             current_tool_bar: None,
             current_tool_info: None,
+            token_count: 0,
+            accumulated_text: String::new(),
         }
     }
 
@@ -62,6 +69,15 @@ impl StreamState {
             self.flush_buffer();
             self.println("");
             self.is_thinking = false;
+        }
+
+        // 累积文本并计算 token
+        self.accumulated_text.push_str(text);
+        self.token_count = utils::count_tokens(&self.accumulated_text);
+
+        // 更新状态行的 token 显示
+        if let Some(ref mut sl) = self.statusline {
+            sl.update("Processing", self.token_count);
         }
 
         // 按行缓冲输出

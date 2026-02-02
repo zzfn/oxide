@@ -17,6 +17,7 @@ use reedline::Signal;
 use std::sync::Arc;
 
 use crate::app::SharedAppState;
+use crate::utils;
 use crate::commands::{CommandRegistry, CommandResult};
 use crate::render::Renderer;
 
@@ -212,8 +213,10 @@ impl Repl {
                         oxide_core::types::Role::Assistant,
                         &response,
                     ));
-                    // TODO: 从 API 响应中获取实际的 token 使用量
-                    state.update_token_usage(input.len() as u64, response.len() as u64, 0);
+                    // 使用 tiktoken 正确计算 token 数量
+                    let input_tokens = utils::count_tokens(input) as u64;
+                    let output_tokens = utils::count_tokens(&response) as u64;
+                    state.update_token_usage(input_tokens, output_tokens, 0);
                     state.end_processing();
                 }
             }
