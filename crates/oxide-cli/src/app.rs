@@ -4,7 +4,7 @@
 
 use oxide_core::types::Conversation;
 use oxide_core::{Config, PromptBuilder, RuntimeContext};
-use oxide_provider::{LLMProvider, RigAnthropicProvider};
+use oxide_provider::RigAnthropicProvider;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -124,11 +124,9 @@ pub struct AppState {
     pub ctrl_c_count: u8,
     /// 当前会话的对话历史
     pub conversation: Conversation,
-    /// LLM Provider（旧版，兼容用）
-    pub provider: Option<Arc<dyn LLMProvider>>,
-    /// Rig Anthropic Provider（新版）
+    /// Rig Anthropic Provider
     pub rig_provider: Option<Arc<RigAnthropicProvider>>,
-    /// Rig Agent Runner（新版）
+    /// Rig Agent Runner
     pub agent_runner: Option<RigAgentRunner>,
     /// 配置
     pub config: Config,
@@ -146,7 +144,6 @@ impl AppState {
             is_processing: false,
             ctrl_c_count: 0,
             conversation: Conversation::new(),
-            provider: None,
             rig_provider: None,
             agent_runner: None,
             config: Config::default(),
@@ -165,12 +162,7 @@ impl AppState {
         Ok(())
     }
 
-    /// 设置 LLM Provider（旧版）
-    pub fn set_provider(&mut self, provider: Arc<dyn LLMProvider>) {
-        self.provider = Some(provider);
-    }
-
-    /// 设置 Rig Provider 和 Agent Runner（新版）
+    /// 设置 Rig Provider 和 Agent Runner
     pub fn set_rig_provider(&mut self, provider: RigAnthropicProvider) {
         let working_dir = self.working_dir.clone();
 
