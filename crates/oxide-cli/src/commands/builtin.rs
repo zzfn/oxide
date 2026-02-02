@@ -272,27 +272,3 @@ impl Command for ModeCommand {
         )))
     }
 }
-
-/// 创建默认命令注册表
-pub fn create_default_registry() -> Arc<CommandRegistry> {
-    // 注册内置命令（除了 help，因为它需要 registry 引用）
-    let mut reg = CommandRegistry::new();
-    reg.register(Arc::new(ClearCommand));
-    reg.register(Arc::new(CompactCommand));
-    reg.register(Arc::new(TasksCommand));
-    reg.register(Arc::new(ConfigCommand));
-    reg.register(Arc::new(QuitCommand));
-    reg.register(Arc::new(ModeCommand));
-
-    // 创建最终的 registry 并添加 help 命令
-    let final_registry = Arc::new(reg);
-
-    // 由于 HelpCommand 需要 registry 引用，我们需要特殊处理
-    // 这里先返回不含 help 的 registry，后续在 REPL 中添加
-    final_registry
-}
-
-/// 注册 help 命令（需要在 registry 创建后调用）
-pub fn register_help_command(registry: &mut CommandRegistry, registry_ref: Arc<CommandRegistry>) {
-    registry.register(Arc::new(HelpCommand::new(registry_ref)));
-}
