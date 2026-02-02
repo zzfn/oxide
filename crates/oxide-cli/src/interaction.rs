@@ -2,9 +2,7 @@
 
 use anyhow::Result;
 use dialoguer::{theme::ColorfulTheme, Input, MultiSelect, Select};
-use oxide_tools::interaction::ask::{
-    AskUserQuestionArgs, AskUserQuestionOutput, InteractionHandler, QuestionType,
-};
+use oxide_tools::{AskUserQuestionArgs, AskUserQuestionOutput, InteractionHandler, QuestionType};
 
 /// CLI 交互处理器
 pub struct CliInteractionHandler;

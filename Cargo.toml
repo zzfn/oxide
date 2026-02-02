@@ -4,7 +4,6 @@ members = [
     "crates/oxide-core",
     "crates/oxide-provider",
     "crates/oxide-tools",
-    "crates/oxide-agent",
     "crates/oxide-cli",
 ]
 

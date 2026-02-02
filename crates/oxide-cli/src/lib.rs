@@ -14,7 +14,3 @@ pub mod utils;
 // 重新导出常用类型
 pub use agent::RigAgentRunner;
 pub use app::{AppState, CliMode, SharedAppState, TokenUsage, create_shared_state};
-
-// 兼容旧接口（已弃用）
-#[allow(deprecated)]
-pub use agent::{Agent, create_tool_registry};

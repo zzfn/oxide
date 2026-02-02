@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::interaction::CliInteractionHandler;
-use crate::render::{Renderer, StreamState};
+use crate::render::StreamState;
 
 /// 创建 CLI 确认回调
 fn create_confirmation_callback(mp: Option<Arc<MultiProgress>>) -> oxide_tools::ConfirmationCallback {
@@ -367,70 +367,6 @@ impl RigAgentRunner {
 /// 创建工具集的任务管理器
 pub fn create_task_manager() -> TaskManager {
     oxide_tools::rig_tools::create_task_manager()
-}
-
-// 兼容层：保留旧的 Agent 接口以便逐步迁移
-
-use oxide_tools::ToolRegistry;
-
-/// 旧版代理（兼容层）
-///
-/// 注意：此实现已弃用，请使用 RigAgentRunner
-#[deprecated(note = "请使用 RigAgentRunner")]
-#[allow(dead_code)]
-pub struct Agent {
-    tool_registry: Arc<ToolRegistry>,
-    renderer: Renderer,
-}
-
-#[allow(deprecated)]
-impl Agent {
-    /// 创建新的代理
-    pub fn new(tool_registry: Arc<ToolRegistry>) -> Self {
-        Self {
-            tool_registry,
-            renderer: Renderer::new(),
-        }
-    }
-
-    /// 执行代理循环（兼容旧接口）
-    pub async fn run(
-        &mut self,
-        _provider: Arc<dyn oxide_provider::LLMProvider>,
-        _messages: &mut Vec<Message>,
-        _stream_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
-    ) -> Result<Message> {
-        // 旧接口不再支持，返回错误提示使用新接口
-        anyhow::bail!("旧版 Agent 已弃用，请使用 RigAgentRunner")
-    }
-}
-
-/// 创建工具注册表并注册所有工具（兼容旧接口）
-#[deprecated(note = "请使用 oxide_tools::create_oxide_toolset")]
-pub fn create_tool_registry(working_dir: PathBuf) -> Arc<ToolRegistry> {
-    let mut registry = ToolRegistry::new();
-
-    // 创建共享的任务管理器
-    let task_manager = oxide_tools::create_task_manager();
-
-    // 注册文件操作工具
-    registry.register(Arc::new(oxide_tools::ReadTool::new(working_dir.clone())));
-    registry.register(Arc::new(oxide_tools::WriteTool::new(working_dir.clone())));
-    registry.register(Arc::new(oxide_tools::EditTool::new(working_dir.clone())));
-
-    // 注册搜索工具
-    registry.register(Arc::new(oxide_tools::GlobTool::new(working_dir.clone())));
-    registry.register(Arc::new(oxide_tools::GrepTool::new(working_dir.clone())));
-
-    // 注册执行工具（共享任务管理器）
-    registry.register(Arc::new(oxide_tools::BashTool::with_task_manager(
-        working_dir.clone(),
-        task_manager.clone(),
-    )));
-    registry.register(Arc::new(oxide_tools::TaskOutputTool::new(task_manager.clone())));
-    registry.register(Arc::new(oxide_tools::TaskStopTool::new(task_manager)));
-
-    Arc::new(registry)
 }
 
 /// 从工具参数中提取关键描述信息

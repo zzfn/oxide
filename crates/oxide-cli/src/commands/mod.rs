@@ -7,7 +7,7 @@ pub mod registry;
 
 pub use builtin::{
     ClearCommand, CompactCommand, ConfigCommand, HelpCommand, ModeCommand, QuitCommand,
-    ReloadConfigCommand, TasksCommand, ToolsCommand, create_default_registry, register_help_command,
+    ReloadConfigCommand, TasksCommand, create_default_registry, register_help_command,
 };
 pub use registry::{Command, CommandRegistry, CommandResult};
 
@@ -25,7 +25,6 @@ pub fn create_registry() -> Arc<CommandRegistry> {
     registry.register(Arc::new(ReloadConfigCommand));
     registry.register(Arc::new(QuitCommand));
     registry.register(Arc::new(ModeCommand));
-    registry.register(Arc::new(ToolsCommand));
 
     let registry = Arc::new(registry);
 
@@ -38,7 +37,6 @@ pub fn create_registry() -> Arc<CommandRegistry> {
     final_registry.register(Arc::new(ReloadConfigCommand));
     final_registry.register(Arc::new(QuitCommand));
     final_registry.register(Arc::new(ModeCommand));
-    final_registry.register(Arc::new(ToolsCommand));
     final_registry.register(Arc::new(HelpCommand::new(registry)));
 
     Arc::new(final_registry)

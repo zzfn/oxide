@@ -5,7 +5,6 @@
 use oxide_core::types::Conversation;
 use oxide_core::{Config, PromptBuilder, RuntimeContext};
 use oxide_provider::{LLMProvider, RigAnthropicProvider};
-use oxide_tools::ToolRegistry;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -127,8 +126,6 @@ pub struct AppState {
     pub conversation: Conversation,
     /// LLM Provider（旧版，兼容用）
     pub provider: Option<Arc<dyn LLMProvider>>,
-    /// 工具注册表（旧版，兼容用）
-    pub tool_registry: Option<Arc<ToolRegistry>>,
     /// Rig Anthropic Provider（新版）
     pub rig_provider: Option<Arc<RigAnthropicProvider>>,
     /// Rig Agent Runner（新版）
@@ -150,7 +147,6 @@ impl AppState {
             ctrl_c_count: 0,
             conversation: Conversation::new(),
             provider: None,
-            tool_registry: None,
             rig_provider: None,
             agent_runner: None,
             config: Config::default(),
@@ -172,11 +168,6 @@ impl AppState {
     /// 设置 LLM Provider（旧版）
     pub fn set_provider(&mut self, provider: Arc<dyn LLMProvider>) {
         self.provider = Some(provider);
-    }
-
-    /// 设置工具注册表（旧版）
-    pub fn set_tool_registry(&mut self, registry: Arc<ToolRegistry>) {
-        self.tool_registry = Some(registry);
     }
 
     /// 设置 Rig Provider 和 Agent Runner（新版）
