@@ -51,12 +51,7 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
 - [x] 实现错误传播和上下文
 - [x] 用户友好的错误消息
 
-#### 0.4 日志系统
-- [x] 集成 `tracing` 框架
-- [ ] 结构化日志输出
-- [ ] 调试模式支持
-
-#### 0.5 Hooks 系统
+#### 0.4 Hooks 系统
 - [ ] 事件钩子配置 (config.toml)
 - [ ] 钩子触发机制
   - `user-prompt-submit-hook`: 用户提交提示词时触发
@@ -385,10 +380,6 @@ serde_json = "1"
 # 错误处理
 anyhow = "1"
 thiserror = "1"
-
-# 日志
-tracing = "0.1"
-tracing-subscriber = "0.3"
 
 # 文件操作
 walkdir = "2"
