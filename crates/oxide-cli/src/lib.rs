@@ -8,7 +8,6 @@ pub mod commands;
 pub mod interaction;
 pub mod render;
 pub mod repl;
-pub mod statusbar;
 pub mod utils;
 
 // 重新导出常用类型
