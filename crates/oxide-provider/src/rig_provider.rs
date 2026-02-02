@@ -4,10 +4,13 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::StreamExt;
 use oxide_core::types::{ContentBlock, Message, Role};
 use rig::client::CompletionClient;
 use rig::providers::anthropic;
 use rig::providers::anthropic::completion::CompletionModel;
+use rig::agent::MultiTurnStreamItem;
+use rig::streaming::{StreamedAssistantContent, StreamingPrompt};
 pub use rig::tool::ToolSet;
 
 use crate::LLMProvider;
@@ -147,16 +150,88 @@ impl LLMProvider for RigAnthropicProvider {
         messages: &[Message],
         callback: Box<dyn Fn(ContentBlock) + Send>,
     ) -> Result<Message> {
-        // 暂时使用非流式实现
-        // TODO: 实现真正的流式响应
-        let response = self.complete(messages).await?;
+        use rig::message::Text;
 
-        // 模拟流式输出
-        for block in &response.content {
-            callback(block.clone());
+        // 获取 system prompt
+        let system = messages
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .filter_map(|m| {
+                m.content.iter().find_map(|block| {
+                    if let ContentBlock::Text { text } = block {
+                        Some(text.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .last();
+
+        // 获取最后一个 user message 作为 prompt
+        let prompt = messages
+            .iter()
+            .filter(|m| m.role == Role::User)
+            .filter_map(|m| {
+                m.content.iter().find_map(|block| {
+                    if let ContentBlock::Text { text } = block {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .last()
+            .unwrap_or("");
+
+        // 创建 agent
+        let mut builder = self.client.agent(&self.model);
+        if let Some(sys) = system {
+            builder = builder.preamble(&sys);
+        }
+        let agent = builder.build();
+
+        // 创建流式请求
+        let mut stream = agent.stream_prompt(prompt).await;
+
+        // 处理流式响应
+        let mut full_text = String::new();
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => {
+                    match content {
+                        StreamedAssistantContent::Text(Text { text }) => {
+                            // 每收到文本增量就立即 callback
+                            callback(ContentBlock::Text { text: text.clone() });
+                            full_text.push_str(&text);
+                        }
+                        _ => {
+                            // 其他类型（工具调用等）暂不处理
+                        }
+                    }
+                }
+                Ok(MultiTurnStreamItem::FinalResponse(_final)) => {
+                    // 流式结束，返回完整响应
+                    return Ok(Message {
+                        id: uuid::Uuid::new_v4(),
+                        role: Role::Assistant,
+                        content: vec![ContentBlock::Text { text: full_text }],
+                        created_at: chrono::Utc::now(),
+                    });
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("流式响应错误: {}", e));
+                }
+                _ => {}
+            }
         }
 
-        Ok(response)
+        // 如果没有收到 FinalResponse，返回已累积的文本
+        Ok(Message {
+            id: uuid::Uuid::new_v4(),
+            role: Role::Assistant,
+            content: vec![ContentBlock::Text { text: full_text }],
+            created_at: chrono::Utc::now(),
+        })
     }
 
     async fn complete_with_tools(
