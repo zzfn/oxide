@@ -95,7 +95,7 @@ fn simulate_tool_call(
     summary: &str,
 ) -> io::Result<()> {
     // 获取底部状态栏，用于 insert_before
-    let status_bar = renderer.statusline_mut().bar().cloned();
+    let status_bar = renderer.statusline_mut().bar().as_ref().cloned();
 
     // 开始工具调用（在状态行上方）
     if let Some(bar) = &status_bar {
