@@ -38,6 +38,16 @@ pub fn plans_dir() -> Result<PathBuf> {
     Ok(oxide_home()?.join("plans"))
 }
 
+/// 获取全局技能目录
+pub fn skills_dir() -> Result<PathBuf> {
+    Ok(oxide_home()?.join("skills"))
+}
+
+/// 获取项目级技能目录
+pub fn project_skills_dir(project_dir: &PathBuf) -> PathBuf {
+    project_dir.join(".oxide").join("skills")
+}
+
 /// 获取全局 OXIDE.md 路径
 pub fn global_oxide_md() -> Result<PathBuf> {
     Ok(oxide_home()?.join("OXIDE.md"))
@@ -215,6 +225,7 @@ impl Config {
             session_env_dir()?,
             tasks_dir()?,
             plans_dir()?,
+            skills_dir()?,
         ];
         for dir in dirs {
             std::fs::create_dir_all(&dir)?;

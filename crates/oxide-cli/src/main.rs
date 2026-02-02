@@ -99,6 +99,9 @@ async fn main() -> Result<()> {
     // 创建共享状态
     let state = create_shared_state();
 
+    // 保存工作目录的副本用于命令注册
+    let working_dir_for_commands = working_dir.clone();
+
     // 初始化 LLM Provider
     {
         let mut state = state.write().await;
@@ -140,8 +143,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    // 创建命令注册表
-    let commands = commands::create_registry();
+    // 创建命令注册表（传入工作目录以支持项目级技能）
+    let commands =
+        commands::create_registry_with_project_dir(Some(working_dir_for_commands)).await;
 
     // 如果提供了 prompt，直接执行并退出
     if let Some(prompt) = args.prompt {
