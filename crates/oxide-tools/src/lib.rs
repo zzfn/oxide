@@ -13,6 +13,7 @@ pub mod interaction;
 pub mod permission;
 pub mod plan;
 pub mod rig_tools;
+pub mod skill;
 pub mod task;
 pub mod web;
 
@@ -39,3 +40,11 @@ pub use rig_tools::{
 pub fn create_task_manager() -> TaskManager {
     TaskManager::new()
 }
+
+// 重新导出技能系统类型
+pub use skill::{
+    create_registry as create_skill_registry,
+    create_registry_with_custom as create_skill_registry_with_custom,
+    Skill, SkillContext, SkillDefinition, SkillKind, SkillLoader, SkillMetadata, SkillRegistry,
+    SkillResult,
+};
