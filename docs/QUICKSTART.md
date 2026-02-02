@@ -126,8 +126,7 @@ oxide/
 ├── crates/
 │   ├── oxide-core/          # ✅ 核心类型和配置
 │   ├── oxide-provider/      # ✅ LLM 提供商（Phase 1 完成）
-│   ├── oxide-tools/         # 🚧 工具系统（待实现）
-│   ├── oxide-agent/         # 🚧 代理系统（待实现）
+│   ├── oxide-tools/         # ✅ 工具系统（已完成）
 │   └── oxide-cli/           # ✅ CLI 界面（基础完成）
 ├── docs/
 │   ├── roadmap.md           # 项目路线图
@@ -169,11 +168,11 @@ oxide/
 - [ ] Bash - 命令执行
 - [ ] WebFetch - 网页获取
 
-### Phase 3: 代理系统
-- [ ] 代理主循环
-- [ ] 工具调用循环
-- [ ] 子代理系统
-- [ ] 任务管理
+### Phase 3: 高级功能
+- [x] 代理主循环
+- [x] 工具调用循环
+- [ ] 子代理系统（待实现）
+- [x] 任务管理
 
 ## 📖 文档
 

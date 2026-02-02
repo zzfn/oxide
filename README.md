@@ -68,7 +68,6 @@ oxide/
 │   ├── oxide-core/          # ✅ 核心类型和配置
 │   ├── oxide-provider/      # ✅ LLM 提供商（支持工具调用）
 │   ├── oxide-tools/         # ✅ 工具系统（Read, Write, Edit, Glob, Grep, Bash）
-│   ├── oxide-agent/         # 🚧 代理系统（基础功能完成）
 │   └── oxide-cli/           # ✅ CLI 界面（完整的代理循环）
 ├── docs/                    # 文档
 │   ├── roadmap.md          # 完整路线图

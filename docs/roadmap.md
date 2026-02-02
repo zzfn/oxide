@@ -29,7 +29,6 @@ Oxide 旨在成为一个高性能、可扩展的 AI 编程助手，复刻 Claude
   - `oxide-provider`: LLM 提供商适配
   - `oxide-tools`: 工具系统实现
   - `oxide-cli`: 命令行界面
-  - `oxide-agent`: 代理和子代理系统
 - [x] 设置 workspace 结构
 - [ ] 配置 CI/CD 流程
 
@@ -427,14 +426,6 @@ oxide/
 │   │   │   ├── search.rs    # Glob, Grep
 │   │   │   ├── exec.rs      # Bash
 │   │   │   └── web.rs       # WebFetch
-│   │   └── Cargo.toml
-│   │
-│   ├── oxide-agent/         # 代理系统
-│   │   ├── src/
-│   │   │   ├── lib.rs
-│   │   │   ├── agent.rs
-│   │   │   ├── subagent.rs
-│   │   │   └── task.rs
 │   │   └── Cargo.toml
 │   │
 │   └── oxide-cli/           # CLI 界面
