@@ -19,7 +19,6 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::backend::CrosstermBackend;
-use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -172,21 +171,22 @@ impl Repl {
         Ok(())
     }
 
-    /// 使用 ratatui insert_before 在 viewport 上方插入纯文本行
+    /// 使用 ratatui insert_before 在 viewport 上方插入文本行。
+    /// 支持 ANSI 颜色码，会解析为 ratatui Span 正确渲染（含宽字符处理）。
     fn insert_text_before(
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         text: &str,
     ) {
-        let lines: Vec<&str> = text.split('\n').collect();
-        let height = lines.len().max(1) as u16;
+        let text_lines: Vec<&str> = text.split('\n').collect();
+        let height = text_lines.len().max(1) as u16;
+        let ratatui_lines: Vec<Line<'static>> = text_lines
+            .iter()
+            .map(|&s| Line::from(parse_ansi_to_spans(s)))
+            .collect();
+
         let _ = terminal.insert_before(height, |buf| {
-            for (i, line_text) in lines.iter().enumerate() {
-                if (i as u16) < buf.area.height {
-                    // Write raw ANSI text using Paragraph which handles basic rendering
-                    let y = buf.area.y + i as u16;
-                    write_ansi_text(buf, buf.area.x, y, buf.area.width, line_text);
-                }
-            }
+            let area = buf.area;
+            Paragraph::new(ratatui_lines).render(area, buf);
         });
     }
 
@@ -850,20 +850,17 @@ impl Repl {
     }
 }
 
-/// Parse simple ANSI escape codes and write styled text to a ratatui Buffer.
-/// Supports: \x1b[0m (reset), \x1b[1m (bold), \x1b[2m (dim), \x1b[Nm (fg color), \x1b[N;Mm (combined).
-fn write_ansi_text(buf: &mut Buffer, x: u16, y: u16, width: u16, text: &str) {
-    let mut col = 0u16;
+/// 解析 ANSI 转义码文本为 ratatui Span 列表。
+fn parse_ansi_to_spans(text: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
     let mut style = Style::default();
+    let mut current = String::new();
     let mut chars = text.chars().peekable();
 
     while let Some(ch) = chars.next() {
-        if col >= width {
-            break;
-        }
         if ch == '\x1b' {
             if chars.peek() == Some(&'[') {
-                chars.next(); // consume '['
+                chars.next();
                 let mut params = String::new();
                 while let Some(&c) = chars.peek() {
                     if c.is_ascii_digit() || c == ';' {
@@ -874,18 +871,23 @@ fn write_ansi_text(buf: &mut Buffer, x: u16, y: u16, width: u16, text: &str) {
                     }
                 }
                 if chars.peek() == Some(&'m') {
-                    chars.next(); // consume 'm'
+                    chars.next();
+                    if !current.is_empty() {
+                        spans.push(Span::styled(std::mem::take(&mut current), style));
+                    }
                     style = apply_ansi_params(&params, style);
                 }
             }
         } else {
-            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
-            if col + cw <= width {
-                buf.set_string(x + col, y, ch.to_string(), style);
-                col += cw;
-            }
+            current.push(ch);
         }
     }
+
+    if !current.is_empty() {
+        spans.push(Span::styled(current, style));
+    }
+
+    spans
 }
 
 fn apply_ansi_params(params: &str, mut style: Style) -> Style {
