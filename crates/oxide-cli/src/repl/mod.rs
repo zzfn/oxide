@@ -57,6 +57,36 @@ impl Repl {
         let mut completion_index: Option<usize> = None;
         let mut scroll_offset: usize = 0;
 
+        // 进入 raw mode 并创建持久化的 terminal（在整个会话期间保持）
+        enable_raw_mode()?;
+        let backend = CrosstermBackend::new(io::stdout());
+        let mut terminal = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(5), // 初始高度：边框(2) + 内容(1) + 状态栏(1) + 余量(1)
+            },
+        )?;
+        terminal.hide_cursor()?;
+
+        let result = self.run_with_persistent_terminal(&mut terminal, &mut editor, &completer, &mut completion_items, &mut completion_index, &mut scroll_offset).await;
+
+        // 清理：退出 raw mode 并恢复光标
+        terminal.show_cursor().ok();
+        terminal.clear().ok();
+        disable_raw_mode()?;
+
+        result
+    }
+
+    async fn run_with_persistent_terminal(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        editor: &mut LineEditor,
+        completer: &OxideCompleter,
+        completion_items: &mut Vec<completer::Suggestion>,
+        completion_index: &mut Option<usize>,
+        scroll_offset: &mut usize,
+    ) -> Result<()> {
         loop {
             let (mode, message_count, token_info) = {
                 let state = self.state.read().await;
@@ -69,19 +99,18 @@ impl Repl {
                 (state.mode, msg_count, token_str)
             };
 
-            // 进入 raw mode，使用 ratatui inline viewport 渲染输入框
-            enable_raw_mode()?;
+            // 渲染输入框并处理输入事件（保持在 raw mode）
             let signal = self.input_loop(
-                &mut editor,
-                &completer,
+                terminal,
+                editor,
+                completer,
                 mode,
-                &mut completion_items,
-                &mut completion_index,
-                &mut scroll_offset,
+                completion_items,
+                completion_index,
+                scroll_offset,
                 message_count,
                 token_info,
             ).await;
-            disable_raw_mode()?;
 
             match signal {
                 InputSignal::Line(line) => {
@@ -99,17 +128,29 @@ impl Repl {
                     }
 
                     if CommandRegistry::is_command(line) {
-                        match self.commands.execute(line, self.state.clone()).await {
+                        // 暂时退出 raw mode 执行命令
+                        disable_raw_mode().ok();
+                        
+                        let result = self.commands.execute(line, self.state.clone()).await;
+                        
+                        // 重新进入 raw mode
+                        enable_raw_mode().ok();
+                        
+                        match result {
                             Ok(CommandResult::Exit) => {
                                 self.renderer.info("再见！");
                                 break;
                             }
                             Ok(CommandResult::Message(msg)) => {
+                                disable_raw_mode().ok();
                                 self.renderer.markdown(&msg);
+                                enable_raw_mode().ok();
                             }
                             Ok(CommandResult::Continue) => {}
                             Err(e) => {
+                                disable_raw_mode().ok();
                                 self.renderer.error(&format!("命令执行失败: {}", e));
+                                enable_raw_mode().ok();
                             }
                         }
                     } else {
@@ -124,6 +165,9 @@ impl Repl {
                             self.handle_user_input(line).await?;
                         } else {
                             let mut context_parts = Vec::new();
+                            
+                            // 暂时退出 raw mode 显示文件引用信息
+                            disable_raw_mode().ok();
                             for fref in &file_refs {
                                 if let Some(content) = fref.read_content() {
                                     self.renderer.info(&format!(
@@ -138,6 +182,7 @@ impl Repl {
                                     ));
                                 }
                             }
+                            enable_raw_mode().ok();
 
                             let augmented = if context_parts.is_empty() {
                                 cleaned_input
@@ -157,7 +202,9 @@ impl Repl {
                         let mut state = self.state.write().await;
                         if state.is_processing {
                             state.end_processing();
+                            disable_raw_mode().ok();
                             self.renderer.warning("操作已取消");
+                            enable_raw_mode().ok();
                             false
                         } else {
                             state.increment_ctrl_c()
@@ -165,24 +212,30 @@ impl Repl {
                     };
 
                     if should_exit {
+                        disable_raw_mode().ok();
                         self.renderer.info("再见！");
                         break;
                     } else {
+                        disable_raw_mode().ok();
                         self.renderer.info("再按一次 Ctrl+C 退出");
+                        enable_raw_mode().ok();
                     }
                     editor.clear();
                 }
                 InputSignal::CtrlD => {
+                    disable_raw_mode().ok();
                     self.renderer.info("再见！");
                     break;
                 }
                 InputSignal::ClearScreen => {
+                    disable_raw_mode().ok();
                     let mut stdout = io::stdout();
                     let _ = crossterm::execute!(
                         stdout,
                         crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
                         crossterm::cursor::MoveTo(0, 0)
                     );
+                    enable_raw_mode().ok();
                 }
                 InputSignal::TabComplete => {}
             }
@@ -191,9 +244,10 @@ impl Repl {
         Ok(())
     }
 
-    /// 输入循环：使用 ratatui inline viewport 渲染输入框并处理按键
+    /// 输入循环：使用持久化的 ratatui terminal 渲染输入框并处理按键
     async fn input_loop(
         &self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         editor: &mut LineEditor,
         completer: &OxideCompleter,
         mode: crate::app::CliMode,
@@ -204,10 +258,9 @@ impl Repl {
         token_info: String,
     ) -> InputSignal {
         let mut current_height: u16 = 0;
-        let mut terminal: Option<Terminal<CrosstermBackend<io::Stdout>>> = None;
 
-        self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
-        self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+        self.ensure_terminal_height(terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+        self.redraw(terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
 
         let signal = loop {
             if event::poll(Duration::from_millis(50)).unwrap_or(false) {
@@ -224,8 +277,8 @@ impl Repl {
                     }
 
                     if matches!(&ev, Event::Resize(..)) {
-                        self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
-                        self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                        self.ensure_terminal_height(terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                        self.redraw(terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                         continue;
                     }
 
@@ -256,8 +309,8 @@ impl Repl {
                                 editor.apply_completion(&value);
                             }
 
-                            self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
-                            self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                            self.ensure_terminal_height(terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                            self.redraw(terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                             continue;
                         }
 
@@ -277,7 +330,7 @@ impl Repl {
                                         let value = completion_items[idx].value.clone();
                                         editor.apply_completion(&value);
                                     }
-                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                                    self.redraw(terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                                     continue;
                                 }
                                 (KeyModifiers::NONE, KeyCode::Down) => {
@@ -289,7 +342,7 @@ impl Repl {
                                         let value = completion_items[idx].value.clone();
                                         editor.apply_completion(&value);
                                     }
-                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                                    self.redraw(terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                                     continue;
                                 }
                                 (KeyModifiers::NONE, KeyCode::Enter) => {
@@ -308,8 +361,8 @@ impl Repl {
                                     completion_items.clear();
                                     *completion_index = None;
                                     *scroll_offset = 0;
-                                    self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
-                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                                    self.ensure_terminal_height(terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                                    self.redraw(terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                                     continue;
                                 }
                                 _ => {}
@@ -348,16 +401,11 @@ impl Repl {
                         }
                     }
 
-                    self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
-                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                    self.ensure_terminal_height(terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                    self.redraw(terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                 }
             }
         };
-
-        if let Some(ref mut t) = terminal {
-            let _ = t.clear();
-            let _ = t.show_cursor();
-        }
 
         signal
     }
@@ -371,10 +419,10 @@ impl Repl {
         }
     }
 
-    /// Recreate the inline terminal if the required height changed
-    fn ensure_terminal(
+    /// 动态调整 inline viewport 高度（如果需要）
+    fn ensure_terminal_height(
         &self,
-        terminal: &mut Option<Terminal<CrosstermBackend<io::Stdout>>>,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         current_height: &mut u16,
         editor: &LineEditor,
         mode: crate::app::CliMode,
@@ -391,29 +439,29 @@ impl Repl {
             .token_info(token_info)
             .required_height(term_width);
 
-        if *current_height != needed || terminal.is_none() {
-            if let Some(ref mut t) = terminal {
-                let _ = t.clear();
-                let _ = t.show_cursor();
-            }
+        if *current_height != needed {
+            // 高度变化时需要重建 terminal
+            let _ = terminal.clear();
+            let _ = terminal.show_cursor();
+            
             let backend = CrosstermBackend::new(io::stdout());
-            let mut t = Terminal::with_options(
+            let mut new_terminal = Terminal::with_options(
                 backend,
                 TerminalOptions {
                     viewport: Viewport::Inline(needed),
                 },
             )
             .expect("failed to create inline terminal");
-            let _ = t.hide_cursor();
-            *terminal = Some(t);
+            let _ = new_terminal.hide_cursor();
+            *terminal = new_terminal;
             *current_height = needed;
         }
     }
 
-    /// Render the input box widget
+    /// 渲染输入框 widget
     fn redraw(
         &self,
-        terminal: &mut Option<Terminal<CrosstermBackend<io::Stdout>>>,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         editor: &LineEditor,
         mode: crate::app::CliMode,
         completions: &[completer::Suggestion],
@@ -422,19 +470,18 @@ impl Repl {
         message_count: usize,
         token_info: &str,
     ) {
-        if let Some(ref mut t) = terminal {
-            let _ = t.draw(|frame| {
-                let area = frame.area();
-                let widget = InputBox::new(editor, mode)
-                    .completions(completions, selected, scroll_offset)
-                    .message_count(message_count)
-                    .token_info(token_info);
-                frame.render_widget(widget, area);
-            });
-        }
+        let _ = terminal.draw(|frame| {
+            let area = frame.area();
+            let widget = InputBox::new(editor, mode)
+                .completions(completions, selected, scroll_offset)
+                .message_count(message_count)
+                .token_info(token_info);
+            frame.render_widget(widget, area);
+        });
     }
 
     /// 打印用户输入（提交后显示）
+    /// 在 raw mode 下需要暂时退出以使用 MultiProgress
     fn print_user_input(&self, input: &str, mode: crate::app::CliMode) {
         let (mode_char, color) = match mode {
             crate::app::CliMode::Normal => ("N", "\x1b[32m"),
@@ -446,16 +493,28 @@ impl Repl {
         } else {
             input.to_string()
         };
-        println!("{}[{}]\x1b[0m \x1b[32m>\x1b[0m {}", color, mode_char, display);
+        
+        // 暂时退出 raw mode 以打印
+        disable_raw_mode().ok();
+        let _ = self.renderer.multi_progress().println(
+            format!("{}[{}]\x1b[0m \x1b[32m>\x1b[0m {}", color, mode_char, display)
+        );
+        enable_raw_mode().ok();
     }
 
     /// 处理用户输入（发送给 AI）
+    /// 
+    /// 流式渲染时会暂时退出 raw mode 以使用 MultiProgress 打印，
+    /// 完成后重新进入 raw mode 并重绘输入框。
     async fn handle_user_input(&mut self, input: &str) -> Result<()> {
         {
             let mut state = self.state.write().await;
             state.start_processing();
         }
 
+        // 暂时退出 raw mode 以进行流式输出
+        disable_raw_mode()?;
+        
         self.renderer.statusline_mut().start("Thinking");
 
         let rig_provider = {
@@ -506,7 +565,12 @@ impl Repl {
         self.renderer.assistant_header();
         self.renderer.statusline_mut().update("Processing", 0);
 
-        match agent_runner.run_stream(&provider, input, chat_history).await {
+        let result = agent_runner.run_stream(&provider, input, chat_history).await;
+        
+        // 流式输出完成，重新进入 raw mode
+        enable_raw_mode()?;
+        
+        match result {
             Ok(response) => {
                 self.renderer.statusline_mut().finish();
 
@@ -524,8 +588,11 @@ impl Repl {
             }
             Err(e) => {
                 self.renderer.statusline_mut().clear();
+                // 在 raw mode 下不能直接 println，需要暂时退出
+                disable_raw_mode().ok();
                 println!();
                 self.renderer.error(&format!("代理执行失败: {}", e));
+                enable_raw_mode().ok();
 
                 {
                     let mut state = self.state.write().await;
