@@ -58,9 +58,15 @@ impl Repl {
         let mut scroll_offset: usize = 0;
 
         loop {
-            let mode = {
+            let (mode, message_count, token_info) = {
                 let state = self.state.read().await;
-                state.mode
+                let msg_count = state.conversation.messages.len();
+                let token_str = format!(
+                    "{}↑ {}↓",
+                    state.token_usage.input_tokens,
+                    state.token_usage.output_tokens
+                );
+                (state.mode, msg_count, token_str)
             };
 
             // 进入 raw mode，使用 ratatui inline viewport 渲染输入框
@@ -72,6 +78,8 @@ impl Repl {
                 &mut completion_items,
                 &mut completion_index,
                 &mut scroll_offset,
+                message_count,
+                token_info,
             ).await;
             disable_raw_mode()?;
 
@@ -192,12 +200,14 @@ impl Repl {
         completion_items: &mut Vec<completer::Suggestion>,
         completion_index: &mut Option<usize>,
         scroll_offset: &mut usize,
+        message_count: usize,
+        token_info: String,
     ) -> InputSignal {
         let mut current_height: u16 = 0;
         let mut terminal: Option<Terminal<CrosstermBackend<io::Stdout>>> = None;
 
-        self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
-        self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+        self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+        self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
 
         let signal = loop {
             if event::poll(Duration::from_millis(50)).unwrap_or(false) {
@@ -214,8 +224,8 @@ impl Repl {
                     }
 
                     if matches!(&ev, Event::Resize(..)) {
-                        self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
-                        self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                        self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                        self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                         continue;
                     }
 
@@ -246,8 +256,8 @@ impl Repl {
                                 editor.apply_completion(&value);
                             }
 
-                            self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
-                            self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                            self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                            self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                             continue;
                         }
 
@@ -267,7 +277,7 @@ impl Repl {
                                         let value = completion_items[idx].value.clone();
                                         editor.apply_completion(&value);
                                     }
-                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                                     continue;
                                 }
                                 (KeyModifiers::NONE, KeyCode::Down) => {
@@ -279,7 +289,7 @@ impl Repl {
                                         let value = completion_items[idx].value.clone();
                                         editor.apply_completion(&value);
                                     }
-                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                                     continue;
                                 }
                                 (KeyModifiers::NONE, KeyCode::Enter) => {
@@ -298,8 +308,8 @@ impl Repl {
                                     completion_items.clear();
                                     *completion_index = None;
                                     *scroll_offset = 0;
-                                    self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
-                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                                    self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                                     continue;
                                 }
                                 _ => {}
@@ -338,8 +348,8 @@ impl Repl {
                         }
                     }
 
-                    self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
-                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                    self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
+                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset, message_count, &token_info);
                 }
             }
         };
@@ -371,10 +381,14 @@ impl Repl {
         completions: &[completer::Suggestion],
         selected: Option<usize>,
         scroll_offset: usize,
+        message_count: usize,
+        token_info: &str,
     ) {
         let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80);
         let needed = InputBox::new(editor, mode)
             .completions(completions, selected, scroll_offset)
+            .message_count(message_count)
+            .token_info(token_info)
             .required_height(term_width);
 
         if *current_height != needed || terminal.is_none() {
@@ -405,12 +419,16 @@ impl Repl {
         completions: &[completer::Suggestion],
         selected: Option<usize>,
         scroll_offset: usize,
+        message_count: usize,
+        token_info: &str,
     ) {
         if let Some(ref mut t) = terminal {
             let _ = t.draw(|frame| {
                 let area = frame.area();
                 let widget = InputBox::new(editor, mode)
-                    .completions(completions, selected, scroll_offset);
+                    .completions(completions, selected, scroll_offset)
+                    .message_count(message_count)
+                    .token_info(token_info);
                 frame.render_widget(widget, area);
             });
         }

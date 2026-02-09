@@ -30,6 +30,9 @@ pub struct InputBox<'a> {
     selected_completion: Option<usize>,
     scroll_offset: usize,
     focused: bool,
+    status_text: Option<&'a str>,
+    message_count: usize,
+    token_info: Option<&'a str>,
 }
 
 impl<'a> InputBox<'a> {
@@ -42,6 +45,9 @@ impl<'a> InputBox<'a> {
             selected_completion: None,
             scroll_offset: 0,
             focused: true,
+            status_text: None,
+            message_count: 0,
+            token_info: None,
         }
     }
 
@@ -59,6 +65,21 @@ impl<'a> InputBox<'a> {
 
     pub fn focused(mut self, focused: bool) -> Self {
         self.focused = focused;
+        self
+    }
+
+    pub fn status_text(mut self, text: &'a str) -> Self {
+        self.status_text = Some(text);
+        self
+    }
+
+    pub fn message_count(mut self, count: usize) -> Self {
+        self.message_count = count;
+        self
+    }
+
+    pub fn token_info(mut self, info: &'a str) -> Self {
+        self.token_info = Some(info);
         self
     }
 
@@ -92,7 +113,7 @@ impl<'a> InputBox<'a> {
     pub fn required_height(&self, width: u16) -> u16 {
         let inner_width = width.saturating_sub(4) as usize;
         if inner_width == 0 {
-            return 3;
+            return 4; // border (2) + content (1) + status (1)
         }
         let lines = self.editor.lines();
         let mut total_rows = 0u16;
@@ -106,13 +127,13 @@ impl<'a> InputBox<'a> {
             total_rows += rows;
         }
         let content_rows = total_rows.max(1).min(10);
-        content_rows + 2 + self.menu_rows()
+        content_rows + 2 + 1 + self.menu_rows() // +1 for status bar
     }
 }
 
 impl Widget for InputBox<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        if area.width < 6 || area.height < 3 {
+        if area.width < 6 || area.height < 4 {
             return;
         }
 
@@ -138,8 +159,8 @@ impl Widget for InputBox<'_> {
         }
         buf.set_string(area.x + area.width - 1, top_y, BORDER_TR, border_style);
 
-        // -- 底部边框 (above menu if present) --
-        let bottom_y = area.y + area.height - 1 - menu_rows;
+        // -- 底部边框 (above status bar and menu) --
+        let bottom_y = area.y + area.height - 2 - menu_rows; // -2 for status bar
         buf.set_string(area.x, bottom_y, BORDER_BL, border_style);
         for x in area.x + 1..area.x + area.width - 1 {
             buf.set_string(x, bottom_y, BORDER_H, border_style);
@@ -227,14 +248,59 @@ impl Widget for InputBox<'_> {
             }
         }
 
+        // -- 状态栏 --
+        let status_y = bottom_y + 1;
+        self.render_status_bar(area, buf, status_y);
+
         // -- 补全菜单 --
         if !self.completions.is_empty() {
-            self.render_dropdown_menu(area, buf, bottom_y + 1);
+            self.render_dropdown_menu(area, buf, status_y + 1);
         }
     }
 }
 
 impl InputBox<'_> {
+    fn render_status_bar(&self, area: Rect, buf: &mut Buffer, y: u16) {
+        let width = area.width as usize;
+        
+        // 如果有自定义状态文本（如"AI 正在回复..."），显示在中间
+        if let Some(status) = self.status_text {
+            let status_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let status_with_padding = format!(" {} ", status);
+            let status_w = status_with_padding.width();
+            if status_w < width {
+                let x_pos = area.x + ((width - status_w) / 2) as u16;
+                buf.set_string(x_pos, y, &status_with_padding, status_style);
+            }
+            return;
+        }
+
+        // 否则显示：左侧（模式 + 消息数） + 右侧（Token 信息）
+        let (mode_char, mode_color) = self.mode_indicator();
+        let left_text = if self.message_count > 0 {
+            format!(" {} │ {} messages ", mode_char, self.message_count)
+        } else {
+            format!(" {} ", mode_char)
+        };
+        let left_style = Style::default().fg(mode_color);
+        buf.set_string(area.x, y, &left_text, left_style);
+
+        // Token 信息显示在右侧
+        if let Some(token_info) = self.token_info {
+            let right_text = format!(" {} ", token_info);
+            let right_w = right_text.width() as u16;
+            if area.width > right_w {
+                let right_x = area.x + area.width - right_w;
+                buf.set_string(
+                    right_x,
+                    y,
+                    &right_text,
+                    Style::default().fg(Color::DarkGray),
+                );
+            }
+        }
+    }
+
     fn render_dropdown_menu(&self, area: Rect, buf: &mut Buffer, start_y: u16) {
         let menu_style = Style::default().fg(Color::DarkGray);
         let total = self.completions.len();
