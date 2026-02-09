@@ -15,7 +15,7 @@ use oxide_provider::RigAnthropicProvider;
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use oxide_cli::{commands, create_shared_state, repl::Repl};
+use oxide_cli::{commands, create_shared_state, tui};
 
 /// 初始化 Langfuse tracing（仅在 debug 模式下启用）
 fn init_langfuse_tracing(debug: bool) {
@@ -154,9 +154,8 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 启动 REPL
-    let mut repl = Repl::new(state, commands);
-    repl.run().await?;
+    // 启动全屏 TUI
+    tui::run_tui(state, commands).await?;
 
     Ok(())
 }
