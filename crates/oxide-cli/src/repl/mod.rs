@@ -109,7 +109,7 @@ impl Repl {
                 completion_index,
                 scroll_offset,
                 message_count,
-                token_info,
+                &token_info,
             ).await;
 
             match signal {
@@ -162,7 +162,7 @@ impl Repl {
                             parse_file_references(line, &working_dir);
 
                         if file_refs.is_empty() {
-                            self.handle_user_input(line).await?;
+                            self.handle_user_input(line, terminal, editor, mode, message_count, token_info.to_string()).await?;
                         } else {
                             let mut context_parts = Vec::new();
                             
@@ -193,7 +193,7 @@ impl Repl {
                                     cleaned_input
                                 )
                             };
-                            self.handle_user_input(&augmented).await?;
+                            self.handle_user_input(&augmented, terminal, editor, mode, message_count, token_info.to_string()).await?;
                         }
                     }
                 }
@@ -255,7 +255,7 @@ impl Repl {
         completion_index: &mut Option<usize>,
         scroll_offset: &mut usize,
         message_count: usize,
-        token_info: String,
+        token_info: &str,
     ) -> InputSignal {
         let mut current_height: u16 = 0;
 
@@ -502,40 +502,60 @@ impl Repl {
         enable_raw_mode().ok();
     }
 
+    /// 在 raw mode 下打印到 viewport 上方（使用 ANSI 转义码）
+    fn print_above_viewport_raw(&self, text: &str) {
+        use std::io::Write;
+        
+        let mut stdout = io::stdout();
+        
+        // 使用 ANSI 转义码：
+        // \x1b7 - 保存光标位置
+        // \x1b[H - 移动到屏幕顶部
+        // \x1b[L - 插入一行（将下方内容向下推）
+        // 打印内容
+        // \x1b8 - 恢复光标位置
+        
+        print!("\x1b7\x1b[H\x1b[L{}\r\x1b8", text);
+        let _ = stdout.flush();
+    }
+
+    /// 在 raw mode 下重新渲染输入框
+    fn redraw_input_box_raw(
+        &self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        editor: &LineEditor,
+        mode: crate::app::CliMode,
+        message_count: usize,
+        token_info: &str,
+    ) {
+        let _ = terminal.draw(|frame| {
+            let area = frame.area();
+            let widget = InputBox::new(editor, mode)
+                .message_count(message_count)
+                .token_info(token_info);
+            frame.render_widget(widget, area);
+        });
+    }
+
     /// 处理用户输入（发送给 AI）
     /// 
-    /// 流式输出期间会暂时隐藏输入框，但显示一个占位符提示用户输入框仍然存在。
-    async fn handle_user_input(&mut self, input: &str) -> Result<()> {
-        let (mode_char, mode_color, message_count) = {
+    /// 在 raw mode 下使用 ANSI 转义码进行流式输出，输入框保持可见。
+    async fn handle_user_input(
+        &mut self,
+        input: &str,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        editor: &LineEditor,
+        mode: crate::app::CliMode,
+        message_count: usize,
+        token_info: String,
+    ) -> Result<()> {
+        {
             let mut state = self.state.write().await;
             state.start_processing();
-            let (mc, mc_color) = match state.mode {
-                crate::app::CliMode::Normal => ("N", "\x1b[32m"),
-                crate::app::CliMode::Fast => ("F", "\x1b[33m"),
-                crate::app::CliMode::Plan => ("P", "\x1b[36m"),
-            };
-            (mc, mc_color, state.conversation.messages.len())
-        };
+        }
 
-        // 退出 raw mode 以进行流式输出
-        disable_raw_mode()?;
-        
-        // 创建一个持久的进度条显示输入框状态
-        use indicatif::{ProgressBar, ProgressStyle};
-        let input_placeholder = self.renderer.multi_progress().add(ProgressBar::new_spinner());
-        input_placeholder.set_style(
-            ProgressStyle::default_spinner()
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                .template("{spinner:.cyan} {msg}")
-                .unwrap()
-        );
-        input_placeholder.set_message(format!(
-            "\x1b[2m╭─\x1b[0m {}[{}]\x1b[0m 输入框就绪 \x1b[2m│\x1b[0m {} 条消息 \x1b[2m─╮\x1b[0m",
-            mode_color, mode_char, message_count
-        ));
-        input_placeholder.enable_steady_tick(std::time::Duration::from_millis(120));
-        
-        self.renderer.statusline_mut().start("Thinking");
+        // 保持在 raw mode，使用自定义输出
+        let _viewport_height = terminal.size().map(|s| s.height).unwrap_or(5);
 
         let rig_provider = {
             let state = self.state.read().await;
@@ -577,21 +597,131 @@ impl Repl {
             (prompt.system, state.config.permissions.clone())
         };
 
-        let agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config)
+        // 创建 agent_runner（用于获取 task_manager 和 permission_manager）
+        let agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir.clone(), permissions_config)
             .with_multi_progress(self.renderer.multi_progress().clone())
             .with_system_prompt(&system_prompt)
             .with_statusline(self.renderer.statusline_mut().clone());
 
-        self.renderer.assistant_header();
-        self.renderer.statusline_mut().update("Processing", 0);
+        // 打印 Assistant 标题
+        self.print_above_viewport_raw("\n\x1b[1;34mAssistant\x1b[0m\n");
+        self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
 
-        let result = agent_runner.run_stream(&provider, input, chat_history).await;
+        // 创建自定义流式处理
+        use rig::streaming::StreamingPrompt;
+        use rig::agent::MultiTurnStreamItem;
+        use rig::streaming::StreamedAssistantContent;
+        use futures::StreamExt;
+
+        let agent = {
+            let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(working_dir.clone())
+                .task_manager(agent_runner.task_manager())
+                .permission_manager(agent_runner.permission_manager())
+                .build_boxed();
+
+            let ask_tool = oxide_tools::rig_tools::RigAskUserQuestionTool::new();
+            ask_tool.set_handler(Arc::new(crate::interaction::CliInteractionHandler::new())).await;
+            tools.push(Box::new(oxide_tools::rig_tools::ToolWrapper::new(ask_tool)));
+
+            provider.create_agent_with_tools(Some(&system_prompt), tools)
+        };
+
+        // 构建提示
+        let prompt = if chat_history.is_empty() {
+            input.to_string()
+        } else {
+            let history_context = self.format_chat_history(&chat_history);
+            format!("{}\n\n用户: {}", history_context, input)
+        };
+
+        // 打印 Assistant 标题
+        self.print_above_viewport_raw("\n\x1b[1;34mAssistant\x1b[0m\n");
+        self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
+
+        // 获取流式响应
+        let mut stream = agent.stream_prompt(&prompt).multi_turn(10).await;
         
-        // 移除输入框占位符
-        input_placeholder.finish_and_clear();
-        
-        // 流式输出完成，重新进入 raw mode
-        enable_raw_mode()?;
+        let mut full_response = String::new();
+        let mut line_buffer = String::new();
+        let mut is_thinking = false;
+
+        // 处理流式响应
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
+                    // 退出思考模式
+                    if is_thinking {
+                        if !line_buffer.is_empty() {
+                            self.print_above_viewport_raw(&line_buffer);
+                            line_buffer.clear();
+                        }
+                        self.print_above_viewport_raw("");
+                        is_thinking = false;
+                        self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
+                    }
+
+                    full_response.push_str(&text.text);
+
+                    // 按行缓冲输出
+                    for ch in text.text.chars() {
+                        if ch == '\n' {
+                            self.print_above_viewport_raw(&line_buffer);
+                            line_buffer.clear();
+                            self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
+                        } else {
+                            line_buffer.push(ch);
+                        }
+                    }
+                }
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning))) => {
+                    if !is_thinking {
+                        if !line_buffer.is_empty() {
+                            self.print_above_viewport_raw(&line_buffer);
+                            line_buffer.clear();
+                        }
+                        self.print_above_viewport_raw("\n💭 思考中:");
+                        is_thinking = true;
+                        self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
+                    }
+
+                    for r in reasoning.reasoning {
+                        self.print_above_viewport_raw(&format!("  \x1b[2m{}\x1b[0m", r));
+                        self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
+                    }
+                }
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall(tool_call))) => {
+                    if !line_buffer.is_empty() {
+                        self.print_above_viewport_raw(&line_buffer);
+                        line_buffer.clear();
+                    }
+                    self.print_above_viewport_raw(&format!("\n\x1b[32m⏺\x1b[0m {}({:?})", tool_call.function.name, tool_call.function.arguments));
+                    self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
+                }
+                Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
+                    full_response = final_res.response().to_string();
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    self.print_above_viewport_raw(&format!("\n\x1b[31m错误: {}\x1b[0m", e));
+                    self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
+                    
+                    let mut state = self.state.write().await;
+                    state.conversation.messages.pop();
+                    state.end_processing();
+                    
+                    return Err(anyhow::anyhow!("流式输出错误: {}", e));
+                }
+            }
+        }
+
+        // 刷新最后的缓冲
+        if !line_buffer.is_empty() {
+            self.print_above_viewport_raw(&line_buffer);
+        }
+        self.print_above_viewport_raw("");
+        self.redraw_input_box_raw(terminal, editor, mode, message_count, &token_info);
+
+        let result: Result<String> = Ok(full_response);
         
         match result {
             Ok(response) => {
@@ -626,5 +756,35 @@ impl Repl {
         }
 
         Ok(())
+    }
+
+    /// 格式化聊天历史为上下文字符串
+    fn format_chat_history(&self, messages: &[oxide_core::types::Message]) -> String {
+        let mut context = String::new();
+
+        for msg in messages {
+            let content_text = msg.content.iter()
+                .filter_map(|block| {
+                    if let oxide_core::types::ContentBlock::Text { text } = block {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            match msg.role {
+                oxide_core::types::Role::User => {
+                    context.push_str(&format!("用户: {}\n\n", content_text));
+                }
+                oxide_core::types::Role::Assistant => {
+                    context.push_str(&format!("助手: {}\n\n", content_text));
+                }
+                _ => {}
+            }
+        }
+
+        context
     }
 }

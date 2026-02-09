@@ -203,6 +203,11 @@ impl RigAgentRunner {
         self.task_manager.clone()
     }
 
+    /// 获取权限管理器
+    pub fn permission_manager(&self) -> PermissionManager {
+        self.permission_manager.clone()
+    }
+
     /// 执行代理
     ///
     /// 使用 rig Agent 处理用户输入，自动处理工具调用循环
