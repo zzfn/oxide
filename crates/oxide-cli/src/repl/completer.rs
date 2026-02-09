@@ -1,8 +1,8 @@
 //! 自动补全
 //!
 //! 支持三种触发符补全：
-//! - `/` - 命令补全
-//! - `@` - 文件路径补全
+//! - `/` - 命令补全（交互式菜单）
+//! - `@` - 文件路径补全（引用文件内容）
 //! - `#` - 标签补全
 
 use std::path::PathBuf;
@@ -10,11 +10,21 @@ use std::sync::Arc;
 
 use crate::commands::CommandRegistry;
 
+/// 补全建议类型
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SuggestionKind {
+    Command,
+    File,
+    Directory,
+    Tag,
+}
+
 /// 补全建议
 #[derive(Debug, Clone)]
 pub struct Suggestion {
     pub value: String,
     pub description: Option<String>,
+    pub kind: SuggestionKind,
 }
 
 /// Oxide 自动补全器
@@ -71,7 +81,8 @@ impl OxideCompleter {
 
     fn complete_commands(&self, prefix: &str) -> Vec<Suggestion> {
         let prefix = prefix.trim_start_matches('/');
-        self.commands
+        let mut suggestions: Vec<Suggestion> = self
+            .commands
             .command_names()
             .into_iter()
             .filter(|name| name.starts_with(prefix))
@@ -81,8 +92,11 @@ impl OxideCompleter {
                     .commands
                     .get(name)
                     .map(|cmd| cmd.description().to_string()),
+                kind: SuggestionKind::Command,
             })
-            .collect()
+            .collect();
+        suggestions.sort_by(|a, b| a.value.cmp(&b.value));
+        suggestions
     }
 
     fn complete_files(&self, prefix: &str) -> Vec<Suggestion> {
@@ -137,11 +151,21 @@ impl OxideCompleter {
                         } else {
                             "文件".to_string()
                         }),
+                        kind: if is_dir {
+                            SuggestionKind::Directory
+                        } else {
+                            SuggestionKind::File
+                        },
                     });
                 }
             }
         }
 
+        suggestions.sort_by(|a, b| {
+            let a_is_dir = a.kind == SuggestionKind::Directory;
+            let b_is_dir = b.kind == SuggestionKind::Directory;
+            b_is_dir.cmp(&a_is_dir).then(a.value.cmp(&b.value))
+        });
         suggestions
     }
 
@@ -153,7 +177,74 @@ impl OxideCompleter {
             .map(|tag| Suggestion {
                 value: format!("#{}", tag),
                 description: Some("标签".to_string()),
+                kind: SuggestionKind::Tag,
             })
             .collect()
+    }
+}
+
+/// 解析输入中的 `@file` 引用，返回 (引用列表, 清理后的文本)
+pub fn parse_file_references(input: &str, working_dir: &std::path::Path) -> (Vec<FileReference>, String) {
+    let mut refs = Vec::new();
+    let mut cleaned = String::new();
+    let mut chars = input.char_indices().peekable();
+
+    while let Some((i, ch)) = chars.next() {
+        if ch == '@' {
+            let start = i;
+            let mut path_str = String::new();
+            while let Some(&(_, next_ch)) = chars.peek() {
+                if next_ch.is_whitespace() || next_ch == '@' {
+                    break;
+                }
+                path_str.push(next_ch);
+                chars.next();
+            }
+
+            if path_str.is_empty() {
+                cleaned.push(ch);
+                continue;
+            }
+
+            let resolved = if path_str.starts_with('/') {
+                PathBuf::from(&path_str)
+            } else {
+                working_dir.join(&path_str)
+            };
+
+            if resolved.exists() && resolved.is_file() {
+                refs.push(FileReference {
+                    raw: input[start..start + 1 + path_str.len()].to_string(),
+                    path: resolved,
+                });
+            } else {
+                cleaned.push_str(&input[start..start + 1 + path_str.len()]);
+            }
+        } else {
+            cleaned.push(ch);
+        }
+    }
+
+    (refs, cleaned.trim().to_string())
+}
+
+/// 文件引用
+#[derive(Debug, Clone)]
+pub struct FileReference {
+    pub raw: String,
+    pub path: PathBuf,
+}
+
+impl FileReference {
+    /// 读取文件内容，返回格式化的上下文字符串
+    pub fn read_content(&self) -> Option<String> {
+        std::fs::read_to_string(&self.path).ok().map(|content| {
+            let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let display_path = self.path.display();
+            format!(
+                "<file path=\"{}\">\n```{}\n{}\n```\n</file>",
+                display_path, ext, content.trim_end()
+            )
+        })
     }
 }

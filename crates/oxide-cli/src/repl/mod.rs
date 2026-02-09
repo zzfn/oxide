@@ -8,7 +8,7 @@ pub mod input_box;
 pub mod keybindings;
 pub mod prompt;
 
-pub use completer::OxideCompleter;
+pub use completer::{parse_file_references, OxideCompleter};
 pub use input::{InputSignal, LineEditor};
 pub use input_box::InputBox;
 pub use prompt::OxidePrompt;
@@ -55,6 +55,7 @@ impl Repl {
         let completer = OxideCompleter::new(self.commands.clone(), working_dir);
         let mut completion_items: Vec<completer::Suggestion> = Vec::new();
         let mut completion_index: Option<usize> = None;
+        let mut scroll_offset: usize = 0;
 
         loop {
             let mode = {
@@ -70,6 +71,7 @@ impl Repl {
                 mode,
                 &mut completion_items,
                 &mut completion_index,
+                &mut scroll_offset,
             ).await;
             disable_raw_mode()?;
 
@@ -103,7 +105,43 @@ impl Repl {
                             }
                         }
                     } else {
-                        self.handle_user_input(line).await?;
+                        let working_dir = {
+                            let state = self.state.read().await;
+                            state.working_dir.clone()
+                        };
+                        let (file_refs, cleaned_input) =
+                            parse_file_references(line, &working_dir);
+
+                        if file_refs.is_empty() {
+                            self.handle_user_input(line).await?;
+                        } else {
+                            let mut context_parts = Vec::new();
+                            for fref in &file_refs {
+                                if let Some(content) = fref.read_content() {
+                                    self.renderer.info(&format!(
+                                        "已引用: {}",
+                                        fref.path.display()
+                                    ));
+                                    context_parts.push(content);
+                                } else {
+                                    self.renderer.warning(&format!(
+                                        "无法读取: {}",
+                                        fref.path.display()
+                                    ));
+                                }
+                            }
+
+                            let augmented = if context_parts.is_empty() {
+                                cleaned_input
+                            } else {
+                                format!(
+                                    "{}\n\n{}",
+                                    context_parts.join("\n\n"),
+                                    cleaned_input
+                                )
+                            };
+                            self.handle_user_input(&augmented).await?;
+                        }
                     }
                 }
                 InputSignal::CtrlC => {
@@ -153,103 +191,229 @@ impl Repl {
         mode: crate::app::CliMode,
         completion_items: &mut Vec<completer::Suggestion>,
         completion_index: &mut Option<usize>,
+        scroll_offset: &mut usize,
     ) -> InputSignal {
-        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80);
-        let initial_height = InputBox::new(editor, mode)
-            .completions(completion_items, *completion_index)
-            .required_height(term_width);
+        let mut current_height: u16 = 0;
+        let mut terminal: Option<Terminal<CrosstermBackend<io::Stdout>>> = None;
 
-        let backend = CrosstermBackend::new(io::stdout());
-        let mut terminal = Terminal::with_options(
-            backend,
-            TerminalOptions {
-                viewport: Viewport::Inline(initial_height),
-            },
-        )
-        .expect("failed to create inline terminal");
-
-        // 隐藏真实光标（我们在 widget 中渲染光标块）
-        let _ = terminal.hide_cursor();
-
-        // 初始渲染
-        self.draw_input(&mut terminal, editor, mode, completion_items, *completion_index);
+        self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
+        self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
 
         let signal = loop {
             if event::poll(Duration::from_millis(50)).unwrap_or(false) {
                 if let Ok(ev) = event::read() {
-                    // Tab 补全
-                    if matches!(
+                    let is_key_press = matches!(
                         &ev,
                         Event::Key(crossterm::event::KeyEvent {
-                            code: KeyCode::Tab,
-                            modifiers: KeyModifiers::NONE,
                             kind: crossterm::event::KeyEventKind::Press,
                             ..
                         })
-                    ) {
-                        if completion_items.is_empty() {
-                            *completion_items = completer.complete(editor.buffer(), editor.cursor());
-                            *completion_index = if completion_items.is_empty() {
-                                None
-                            } else {
-                                Some(0)
-                            };
-                        } else if let Some(ref mut idx) = completion_index {
-                            *idx = (*idx + 1) % completion_items.len();
-                        }
-
-                        if let Some(idx) = *completion_index {
-                            let value = completion_items[idx].value.clone();
-                            editor.apply_completion(&value);
-                        }
-
-                        self.draw_input(&mut terminal, editor, mode, completion_items, *completion_index);
+                    );
+                    if !is_key_press && !matches!(&ev, Event::Resize(..) | Event::Paste(_)) {
                         continue;
                     }
 
-                    // 窗口大小变化
                     if matches!(&ev, Event::Resize(..)) {
-                        self.draw_input(&mut terminal, editor, mode, completion_items, *completion_index);
+                        self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
+                        self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
                         continue;
                     }
 
-                    // 非 Tab 键清除补全
-                    if !completion_items.is_empty() {
+                    let has_menu = !completion_items.is_empty();
+
+                    if let Event::Key(key_ev) = &ev {
+                        let code = key_ev.code;
+                        let mods = key_ev.modifiers;
+
+                        // Tab: trigger or cycle completions
+                        if code == KeyCode::Tab && mods == KeyModifiers::NONE {
+                            if completion_items.is_empty() {
+                                *completion_items =
+                                    completer.complete(editor.buffer(), editor.cursor());
+                                *completion_index = if completion_items.is_empty() {
+                                    None
+                                } else {
+                                    Some(0)
+                                };
+                                *scroll_offset = 0;
+                            } else if let Some(ref mut idx) = completion_index {
+                                *idx = (*idx + 1) % completion_items.len();
+                                Self::adjust_scroll(scroll_offset, *idx, completion_items.len());
+                            }
+
+                            if let Some(idx) = *completion_index {
+                                let value = completion_items[idx].value.clone();
+                                editor.apply_completion(&value);
+                            }
+
+                            self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
+                            self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                            continue;
+                        }
+
+                        // When any menu is open, handle navigation
+                        if has_menu {
+                            match (mods, code) {
+                                (KeyModifiers::NONE, KeyCode::Up) => {
+                                    if let Some(ref mut idx) = completion_index {
+                                        if *idx > 0 {
+                                            *idx -= 1;
+                                        } else {
+                                            *idx = completion_items.len() - 1;
+                                        }
+                                        Self::adjust_scroll(scroll_offset, *idx, completion_items.len());
+                                    }
+                                    if let Some(idx) = *completion_index {
+                                        let value = completion_items[idx].value.clone();
+                                        editor.apply_completion(&value);
+                                    }
+                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                                    continue;
+                                }
+                                (KeyModifiers::NONE, KeyCode::Down) => {
+                                    if let Some(ref mut idx) = completion_index {
+                                        *idx = (*idx + 1) % completion_items.len();
+                                        Self::adjust_scroll(scroll_offset, *idx, completion_items.len());
+                                    }
+                                    if let Some(idx) = *completion_index {
+                                        let value = completion_items[idx].value.clone();
+                                        editor.apply_completion(&value);
+                                    }
+                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                                    continue;
+                                }
+                                (KeyModifiers::NONE, KeyCode::Enter) => {
+                                    if let Some(idx) = *completion_index {
+                                        let value = completion_items[idx].value.clone();
+                                        editor.apply_completion(&value);
+                                    }
+                                    completion_items.clear();
+                                    *completion_index = None;
+                                    *scroll_offset = 0;
+                                    let line = editor.buffer().to_string();
+                                    editor.clear();
+                                    break InputSignal::Line(line);
+                                }
+                                (KeyModifiers::NONE, KeyCode::Esc) => {
+                                    completion_items.clear();
+                                    *completion_index = None;
+                                    *scroll_offset = 0;
+                                    self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
+                                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    // Clear completions on any other key
+                    if has_menu {
                         completion_items.clear();
                         *completion_index = None;
+                        *scroll_offset = 0;
                     }
 
                     if let Some(signal) = editor.handle_event(&ev) {
                         break signal;
                     }
 
-                    self.draw_input(&mut terminal, editor, mode, completion_items, *completion_index);
+                    // Auto-trigger completions when typing `/` or `@`
+                    let buf = editor.buffer().to_string();
+                    let pos = editor.cursor();
+                    if pos > 0 {
+                        let word_start = buf[..pos]
+                            .rfind(|c: char| c.is_whitespace())
+                            .map(|i| i + 1)
+                            .unwrap_or(0);
+                        let current_word = &buf[word_start..pos];
+                        if current_word.starts_with('/') || current_word.starts_with('@') {
+                            *completion_items = completer.complete(&buf, pos);
+                            *completion_index = if completion_items.is_empty() {
+                                None
+                            } else {
+                                Some(0)
+                            };
+                            *scroll_offset = 0;
+                        }
+                    }
+
+                    self.ensure_terminal(&mut terminal, &mut current_height, editor, mode, completion_items, *completion_index, *scroll_offset);
+                    self.redraw(&mut terminal, editor, mode, completion_items, *completion_index, *scroll_offset);
                 }
             }
         };
 
-        // 清除 inline viewport 区域
-        let _ = terminal.clear();
-        let _ = terminal.show_cursor();
+        if let Some(ref mut t) = terminal {
+            let _ = t.clear();
+            let _ = t.show_cursor();
+        }
 
         signal
     }
 
-    /// 使用 ratatui 渲染输入框
-    fn draw_input(
+    fn adjust_scroll(scroll_offset: &mut usize, selected: usize, total: usize) {
+        let max_visible = total.min(input_box::MAX_VISIBLE_ITEMS);
+        if selected < *scroll_offset {
+            *scroll_offset = selected;
+        } else if selected >= *scroll_offset + max_visible {
+            *scroll_offset = selected + 1 - max_visible;
+        }
+    }
+
+    /// Recreate the inline terminal if the required height changed
+    fn ensure_terminal(
         &self,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        terminal: &mut Option<Terminal<CrosstermBackend<io::Stdout>>>,
+        current_height: &mut u16,
         editor: &LineEditor,
         mode: crate::app::CliMode,
         completions: &[completer::Suggestion],
         selected: Option<usize>,
+        scroll_offset: usize,
     ) {
-        let _ = terminal.draw(|frame| {
-            let area = frame.area();
-            let widget = InputBox::new(editor, mode)
-                .completions(completions, selected);
-            frame.render_widget(widget, area);
-        });
+        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80);
+        let needed = InputBox::new(editor, mode)
+            .completions(completions, selected, scroll_offset)
+            .required_height(term_width);
+
+        if *current_height != needed || terminal.is_none() {
+            if let Some(ref mut t) = terminal {
+                let _ = t.clear();
+                let _ = t.show_cursor();
+            }
+            let backend = CrosstermBackend::new(io::stdout());
+            let mut t = Terminal::with_options(
+                backend,
+                TerminalOptions {
+                    viewport: Viewport::Inline(needed),
+                },
+            )
+            .expect("failed to create inline terminal");
+            let _ = t.hide_cursor();
+            *terminal = Some(t);
+            *current_height = needed;
+        }
+    }
+
+    /// Render the input box widget
+    fn redraw(
+        &self,
+        terminal: &mut Option<Terminal<CrosstermBackend<io::Stdout>>>,
+        editor: &LineEditor,
+        mode: crate::app::CliMode,
+        completions: &[completer::Suggestion],
+        selected: Option<usize>,
+        scroll_offset: usize,
+    ) {
+        if let Some(ref mut t) = terminal {
+            let _ = t.draw(|frame| {
+                let area = frame.area();
+                let widget = InputBox::new(editor, mode)
+                    .completions(completions, selected, scroll_offset);
+                frame.render_widget(widget, area);
+            });
+        }
     }
 
     /// 打印用户输入（提交后显示）
