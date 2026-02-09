@@ -1,38 +1,40 @@
 //! REPL 模块
 //!
-//! 提供交互式命令行界面，包括编辑器、补全、提示符和主循环。
+//! 提供交互式命令行界面，使用 ratatui inline viewport 渲染多行输入框。
 
 pub mod completer;
-pub mod editor;
+pub mod input;
+pub mod input_box;
 pub mod keybindings;
 pub mod prompt;
 
 pub use completer::OxideCompleter;
-pub use editor::create_editor;
-pub use keybindings::create_keybindings;
+pub use input::{InputSignal, LineEditor};
+pub use input_box::InputBox;
 pub use prompt::OxidePrompt;
 
 use anyhow::Result;
-use reedline::Signal;
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use ratatui::backend::CrosstermBackend;
+use ratatui::{Terminal, TerminalOptions, Viewport};
+use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::app::SharedAppState;
-use crate::utils;
 use crate::commands::{CommandRegistry, CommandResult};
 use crate::render::Renderer;
+use crate::utils;
 
 /// REPL 主循环
 pub struct Repl {
-    /// 共享应用状态
     state: SharedAppState,
-    /// 命令注册表
     commands: Arc<CommandRegistry>,
-    /// 渲染器
     renderer: Renderer,
 }
 
 impl Repl {
-    /// 创建新的 REPL
     pub fn new(state: SharedAppState, commands: Arc<CommandRegistry>) -> Self {
         Self {
             state,
@@ -41,45 +43,52 @@ impl Repl {
         }
     }
 
-    /// 运行 REPL 主循环
     pub async fn run(&mut self) -> Result<()> {
-        // 显示欢迎信息
         self.renderer.welcome();
 
-        // 获取工作目录
         let working_dir = {
             let state = self.state.read().await;
             state.working_dir.clone()
         };
 
-        // 创建编辑器
-        let mut editor = create_editor(self.commands.clone(), working_dir)?;
+        let mut editor = LineEditor::new();
+        let completer = OxideCompleter::new(self.commands.clone(), working_dir);
+        let mut completion_items: Vec<completer::Suggestion> = Vec::new();
+        let mut completion_index: Option<usize> = None;
 
         loop {
-            // 获取当前模式并创建提示符
             let mode = {
                 let state = self.state.read().await;
                 state.mode
             };
-            let prompt = OxidePrompt::new(mode);
 
-            // 读取用户输入
-            match editor.read_line(&prompt) {
-                Ok(Signal::Success(line)) => {
+            // 进入 raw mode，使用 ratatui inline viewport 渲染输入框
+            enable_raw_mode()?;
+            let signal = self.input_loop(
+                &mut editor,
+                &completer,
+                mode,
+                &mut completion_items,
+                &mut completion_index,
+            ).await;
+            disable_raw_mode()?;
+
+            match signal {
+                InputSignal::Line(line) => {
+                    // 打印用户输入
+                    self.print_user_input(&line, mode);
+
                     let line = line.trim();
                     if line.is_empty() {
                         continue;
                     }
 
-                    // 重置 Ctrl+C 计数
                     {
                         let mut state = self.state.write().await;
                         state.reset_ctrl_c();
                     }
 
-                    // 处理输入
                     if CommandRegistry::is_command(line) {
-                        // 执行命令
                         match self.commands.execute(line, self.state.clone()).await {
                             Ok(CommandResult::Exit) => {
                                 self.renderer.info("再见！");
@@ -94,20 +103,17 @@ impl Repl {
                             }
                         }
                     } else {
-                        // 处理普通输入（发送给 AI）
                         self.handle_user_input(line).await?;
                     }
                 }
-                Ok(Signal::CtrlC) => {
+                InputSignal::CtrlC => {
                     let should_exit = {
                         let mut state = self.state.write().await;
                         if state.is_processing {
-                            // 如果正在处理，取消当前操作
                             state.end_processing();
                             self.renderer.warning("操作已取消");
                             false
                         } else {
-                            // 否则检查是否应该退出
                             state.increment_ctrl_c()
                         }
                     };
@@ -118,32 +124,158 @@ impl Repl {
                     } else {
                         self.renderer.info("再按一次 Ctrl+C 退出");
                     }
+                    editor.clear();
                 }
-                Ok(Signal::CtrlD) => {
+                InputSignal::CtrlD => {
                     self.renderer.info("再见！");
                     break;
                 }
-                Err(e) => {
-                    self.renderer.error(&format!("输入错误: {}", e));
+                InputSignal::ClearScreen => {
+                    let mut stdout = io::stdout();
+                    let _ = crossterm::execute!(
+                        stdout,
+                        crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                        crossterm::cursor::MoveTo(0, 0)
+                    );
                 }
+                InputSignal::TabComplete => {}
             }
         }
 
         Ok(())
     }
 
+    /// 输入循环：使用 ratatui inline viewport 渲染输入框并处理按键
+    async fn input_loop(
+        &self,
+        editor: &mut LineEditor,
+        completer: &OxideCompleter,
+        mode: crate::app::CliMode,
+        completion_items: &mut Vec<completer::Suggestion>,
+        completion_index: &mut Option<usize>,
+    ) -> InputSignal {
+        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80);
+        let initial_height = InputBox::new(editor, mode)
+            .completions(completion_items, *completion_index)
+            .required_height(term_width);
+
+        let backend = CrosstermBackend::new(io::stdout());
+        let mut terminal = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(initial_height),
+            },
+        )
+        .expect("failed to create inline terminal");
+
+        // 隐藏真实光标（我们在 widget 中渲染光标块）
+        let _ = terminal.hide_cursor();
+
+        // 初始渲染
+        self.draw_input(&mut terminal, editor, mode, completion_items, *completion_index);
+
+        let signal = loop {
+            if event::poll(Duration::from_millis(50)).unwrap_or(false) {
+                if let Ok(ev) = event::read() {
+                    // Tab 补全
+                    if matches!(
+                        &ev,
+                        Event::Key(crossterm::event::KeyEvent {
+                            code: KeyCode::Tab,
+                            modifiers: KeyModifiers::NONE,
+                            kind: crossterm::event::KeyEventKind::Press,
+                            ..
+                        })
+                    ) {
+                        if completion_items.is_empty() {
+                            *completion_items = completer.complete(editor.buffer(), editor.cursor());
+                            *completion_index = if completion_items.is_empty() {
+                                None
+                            } else {
+                                Some(0)
+                            };
+                        } else if let Some(ref mut idx) = completion_index {
+                            *idx = (*idx + 1) % completion_items.len();
+                        }
+
+                        if let Some(idx) = *completion_index {
+                            let value = completion_items[idx].value.clone();
+                            editor.apply_completion(&value);
+                        }
+
+                        self.draw_input(&mut terminal, editor, mode, completion_items, *completion_index);
+                        continue;
+                    }
+
+                    // 窗口大小变化
+                    if matches!(&ev, Event::Resize(..)) {
+                        self.draw_input(&mut terminal, editor, mode, completion_items, *completion_index);
+                        continue;
+                    }
+
+                    // 非 Tab 键清除补全
+                    if !completion_items.is_empty() {
+                        completion_items.clear();
+                        *completion_index = None;
+                    }
+
+                    if let Some(signal) = editor.handle_event(&ev) {
+                        break signal;
+                    }
+
+                    self.draw_input(&mut terminal, editor, mode, completion_items, *completion_index);
+                }
+            }
+        };
+
+        // 清除 inline viewport 区域
+        let _ = terminal.clear();
+        let _ = terminal.show_cursor();
+
+        signal
+    }
+
+    /// 使用 ratatui 渲染输入框
+    fn draw_input(
+        &self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        editor: &LineEditor,
+        mode: crate::app::CliMode,
+        completions: &[completer::Suggestion],
+        selected: Option<usize>,
+    ) {
+        let _ = terminal.draw(|frame| {
+            let area = frame.area();
+            let widget = InputBox::new(editor, mode)
+                .completions(completions, selected);
+            frame.render_widget(widget, area);
+        });
+    }
+
+    /// 打印用户输入（提交后显示）
+    fn print_user_input(&self, input: &str, mode: crate::app::CliMode) {
+        let (mode_char, color) = match mode {
+            crate::app::CliMode::Normal => ("N", "\x1b[32m"),
+            crate::app::CliMode::Fast => ("F", "\x1b[33m"),
+            crate::app::CliMode::Plan => ("P", "\x1b[36m"),
+        };
+        let display = if input.contains('\n') {
+            input.replace('\n', "\n    ")
+        } else {
+            input.to_string()
+        };
+        println!("{}[{}]\x1b[0m \x1b[32m>\x1b[0m {}", color, mode_char, display);
+    }
+
     /// 处理用户输入（发送给 AI）
     async fn handle_user_input(&mut self, input: &str) -> Result<()> {
-        // 标记开始处理
         {
             let mut state = self.state.write().await;
             state.start_processing();
         }
 
-        // 启动底部状态行
         self.renderer.statusline_mut().start("Thinking");
 
-        // 检查是否有 Rig Provider
         let rig_provider = {
             let state = self.state.read().await;
             state.rig_provider.clone()
@@ -157,7 +289,6 @@ impl Repl {
             return Ok(());
         };
 
-        // 添加用户消息到会话
         {
             let mut state = self.state.write().await;
             state.conversation.add_message(oxide_core::types::Message::text(
@@ -166,17 +297,14 @@ impl Repl {
             ));
         }
 
-        // 获取会话历史和工作目录
         let (chat_history, working_dir) = {
             let state = self.state.read().await;
             (state.conversation.messages.clone(), state.working_dir.clone())
         };
 
-        // 加载指令文件和配置，构建完整系统提示词
         let (system_prompt, permissions_config) = {
             let state = self.state.read().await;
 
-            // 使用 PromptBuilder 构建完整的系统提示词
             let context = oxide_core::prompt::RuntimeContext::from_env(working_dir.clone())
                 .with_model("Claude", &state.config.model.default_model);
 
@@ -188,32 +316,24 @@ impl Repl {
             (prompt.system, state.config.permissions.clone())
         };
 
-        // 创建 Agent Runner（使用配置的权限）
         let agent_runner = crate::agent::RigAgentRunner::new_with_config(working_dir, permissions_config)
             .with_multi_progress(self.renderer.multi_progress().clone())
             .with_system_prompt(&system_prompt)
             .with_statusline(self.renderer.statusline_mut().clone());
 
-        // 显示助手响应头部
         self.renderer.assistant_header();
-
-        // 更新状态行
         self.renderer.statusline_mut().update("Processing", 0);
 
-        // 运行代理（流式输出）
         match agent_runner.run_stream(&provider, input, chat_history).await {
             Ok(response) => {
-                // 完成状态行
                 self.renderer.statusline_mut().finish();
 
-                // 更新会话历史
                 {
                     let mut state = self.state.write().await;
                     state.conversation.add_message(oxide_core::types::Message::text(
                         oxide_core::types::Role::Assistant,
                         &response,
                     ));
-                    // 使用 tiktoken 正确计算 token 数量
                     let input_tokens = utils::count_tokens(input) as u64;
                     let output_tokens = utils::count_tokens(&response) as u64;
                     state.update_token_usage(input_tokens, output_tokens, 0);
@@ -221,12 +341,10 @@ impl Repl {
                 }
             }
             Err(e) => {
-                // 清除状态行
                 self.renderer.statusline_mut().clear();
-                println!(); // 换行
+                println!();
                 self.renderer.error(&format!("代理执行失败: {}", e));
 
-                // 移除失败的用户消息
                 {
                     let mut state = self.state.write().await;
                     state.conversation.messages.pop();

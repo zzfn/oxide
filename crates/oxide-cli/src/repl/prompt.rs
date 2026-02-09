@@ -2,75 +2,53 @@
 //!
 //! 根据当前模式显示不同的提示符样式。
 
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus};
-use std::borrow::Cow;
+use ratatui::prelude::*;
+use ratatui::widgets::Paragraph;
 
-use crate::app::{CliMode, SharedAppState};
+use crate::app::CliMode;
 
 /// Oxide 自定义提示符
 pub struct OxidePrompt {
-    /// 当前模式
     mode: CliMode,
 }
 
 impl OxidePrompt {
-    /// 创建新的提示符
     pub fn new(mode: CliMode) -> Self {
         Self { mode }
     }
 
-    /// 更新模式
     pub fn set_mode(&mut self, mode: CliMode) {
         self.mode = mode;
     }
 
-    /// 从共享状态创建提示符
-    pub async fn from_state(state: &SharedAppState) -> Self {
-        let state = state.read().await;
-        Self::new(state.mode)
-    }
-
-    /// 获取模式颜色
-    fn mode_color(&self) -> &'static str {
+    fn mode_color(&self) -> Color {
         match self.mode {
-            CliMode::Normal => "\x1b[32m", // 绿色
-            CliMode::Fast => "\x1b[33m",   // 黄色
-            CliMode::Plan => "\x1b[36m",   // 青色
+            CliMode::Normal => Color::Green,
+            CliMode::Fast => Color::Yellow,
+            CliMode::Plan => Color::Cyan,
         }
     }
-}
 
-impl Prompt for OxidePrompt {
-    fn render_prompt_left(&self) -> Cow<'_, str> {
+    /// 构建提示符 Spans（用于内联渲染）
+    pub fn spans(&self) -> Vec<Span<'_>> {
         let color = self.mode_color();
         let mode_char = self.mode.short_name();
-        Cow::Owned(format!("{}[{}]\x1b[0m ", color, mode_char))
+        vec![
+            Span::styled(format!("[{}]", mode_char), Style::default().fg(color)),
+            Span::raw(" "),
+            Span::styled("> ", Style::default().fg(Color::Green)),
+        ]
     }
 
-    fn render_prompt_right(&self) -> Cow<'_, str> {
-        Cow::Borrowed("")
+    /// 构建为 ratatui Paragraph widget
+    pub fn widget(&self) -> Paragraph<'_> {
+        Paragraph::new(Line::from(self.spans()))
     }
 
-    fn render_prompt_indicator(&self, _edit_mode: PromptEditMode) -> Cow<'_, str> {
-        Cow::Borrowed("\x1b[32m>\x1b[0m ")
-    }
-
-    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        Cow::Borrowed("... ")
-    }
-
-    fn render_prompt_history_search_indicator(
-        &self,
-        history_search: PromptHistorySearch,
-    ) -> Cow<'_, str> {
-        let prefix = match history_search.status {
-            PromptHistorySearchStatus::Passing => "",
-            PromptHistorySearchStatus::Failing => "failing ",
-        };
-        Cow::Owned(format!(
-            "({}reverse-search: {}) ",
-            prefix, history_search.term
-        ))
+    /// 提示符的显示宽度（字符数）
+    pub fn display_width(&self) -> u16 {
+        // "[N] > " = 6
+        6
     }
 }
 

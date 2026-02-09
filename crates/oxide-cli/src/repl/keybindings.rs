@@ -1,91 +1,26 @@
-//! 快捷键绑定
+//! 快捷键说明
 //!
-//! 配置 Reedline 的快捷键，使用 Emacs 模式并添加自定义绑定。
+//! 定义可用的快捷键列表（实际处理在 input.rs 的 LineEditor 中）。
 
-use reedline::{
-    default_emacs_keybindings, EditCommand, KeyCode, KeyModifiers, Keybindings, ReedlineEvent,
-};
+/// 快捷键描述
+pub struct KeyBinding {
+    pub keys: &'static str,
+    pub description: &'static str,
+}
 
-/// 创建自定义快捷键绑定
-pub fn create_keybindings() -> Keybindings {
-    let mut keybindings = default_emacs_keybindings();
-
-    // Ctrl+L: 清屏
-    keybindings.add_binding(
-        KeyModifiers::CONTROL,
-        KeyCode::Char('l'),
-        ReedlineEvent::ClearScreen,
-    );
-
-    // Ctrl+U: 清除当前行
-    keybindings.add_binding(
-        KeyModifiers::CONTROL,
-        KeyCode::Char('u'),
-        ReedlineEvent::Edit(vec![EditCommand::CutFromStart]),
-    );
-
-    // Ctrl+K: 删除到行尾
-    keybindings.add_binding(
-        KeyModifiers::CONTROL,
-        KeyCode::Char('k'),
-        ReedlineEvent::Edit(vec![EditCommand::CutToEnd]),
-    );
-
-    // Ctrl+W: 删除前一个词
-    keybindings.add_binding(
-        KeyModifiers::CONTROL,
-        KeyCode::Char('w'),
-        ReedlineEvent::Edit(vec![EditCommand::CutWordLeft]),
-    );
-
-    // Alt+Backspace: 删除前一个词（备选）
-    keybindings.add_binding(
-        KeyModifiers::ALT,
-        KeyCode::Backspace,
-        ReedlineEvent::Edit(vec![EditCommand::CutWordLeft]),
-    );
-
-    // Ctrl+Y: 粘贴
-    keybindings.add_binding(
-        KeyModifiers::CONTROL,
-        KeyCode::Char('y'),
-        ReedlineEvent::Edit(vec![EditCommand::PasteCutBufferBefore]),
-    );
-
-    // Ctrl+A: 移动到行首
-    keybindings.add_binding(
-        KeyModifiers::CONTROL,
-        KeyCode::Char('a'),
-        ReedlineEvent::Edit(vec![EditCommand::MoveToStart { select: false }]),
-    );
-
-    // Ctrl+E: 移动到行尾
-    keybindings.add_binding(
-        KeyModifiers::CONTROL,
-        KeyCode::Char('e'),
-        ReedlineEvent::Edit(vec![EditCommand::MoveToEnd { select: false }]),
-    );
-
-    // Alt+F: 向前移动一个词
-    keybindings.add_binding(
-        KeyModifiers::ALT,
-        KeyCode::Char('f'),
-        ReedlineEvent::Edit(vec![EditCommand::MoveWordRight { select: false }]),
-    );
-
-    // Alt+B: 向后移动一个词
-    keybindings.add_binding(
-        KeyModifiers::ALT,
-        KeyCode::Char('b'),
-        ReedlineEvent::Edit(vec![EditCommand::MoveWordLeft { select: false }]),
-    );
-
-    // Tab: 触发补全菜单
-    keybindings.add_binding(
-        KeyModifiers::NONE,
-        KeyCode::Tab,
-        ReedlineEvent::Menu("completion_menu".to_string()),
-    );
-
-    keybindings
+/// 获取所有快捷键描述
+pub fn keybinding_help() -> Vec<KeyBinding> {
+    vec![
+        KeyBinding { keys: "Ctrl+A", description: "移动到行首" },
+        KeyBinding { keys: "Ctrl+E", description: "移动到行尾" },
+        KeyBinding { keys: "Ctrl+U", description: "清除到行首" },
+        KeyBinding { keys: "Ctrl+K", description: "清除到行尾" },
+        KeyBinding { keys: "Ctrl+W", description: "删除前一个词" },
+        KeyBinding { keys: "Alt+F", description: "向前移动一个词" },
+        KeyBinding { keys: "Alt+B", description: "向后移动一个词" },
+        KeyBinding { keys: "Tab", description: "触发补全" },
+        KeyBinding { keys: "Up/Down", description: "浏览历史" },
+        KeyBinding { keys: "Ctrl+C x2", description: "退出" },
+        KeyBinding { keys: "Ctrl+D", description: "退出（空行时）" },
+    ]
 }
