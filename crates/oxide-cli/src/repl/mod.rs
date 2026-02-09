@@ -398,16 +398,23 @@ impl Repl {
             let _ = terminal.show_cursor();
 
             let backend = CrosstermBackend::new(io::stdout());
-            let mut new_terminal = Terminal::with_options(
+            match Terminal::with_options(
                 backend,
                 TerminalOptions {
                     viewport: Viewport::Inline(needed),
                 },
-            )
-            .expect("failed to create inline terminal");
-            let _ = new_terminal.hide_cursor();
-            *terminal = new_terminal;
-            *current_height = needed;
+            ) {
+                Ok(mut new_terminal) => {
+                    let _ = new_terminal.hide_cursor();
+                    *terminal = new_terminal;
+                    *current_height = needed;
+                }
+                Err(_) => {
+                    // Cursor position read can fail when EventStream is active.
+                    // Keep using the current terminal with existing height.
+                    let _ = terminal.hide_cursor();
+                }
+            }
         }
     }
 
