@@ -133,59 +133,9 @@ impl Repl {
                         state.reset_ctrl_c();
                     }
 
-                    if CommandRegistry::is_command(line) {
-                        disable_raw_mode().ok();
-                        let result = self.commands.execute(line, self.state.clone()).await;
-                        enable_raw_mode().ok();
-
-                        match result {
-                            Ok(CommandResult::Exit) => {
-                                Self::insert_text_before(terminal, "\x1b[34mInfo:\x1b[0m 再见！");
-                                break;
-                            }
-                            Ok(CommandResult::Message(msg)) => {
-                                for msg_line in msg.lines() {
-                                    Self::insert_text_before(terminal, msg_line);
-                                }
-                            }
-                            Ok(CommandResult::Continue) => {}
-                            Err(e) => {
-                                Self::insert_text_before(terminal, &format!("\x1b[31mError:\x1b[0m 命令执行失败: {}", e));
-                            }
-                        }
-                    } else {
-                        let working_dir = {
-                            let state = self.state.read().await;
-                            state.working_dir.clone()
-                        };
-                        let (file_refs, cleaned_input) =
-                            parse_file_references(line, &working_dir);
-
-                        if file_refs.is_empty() {
-                            self.handle_user_input(line, terminal, editor, mode, message_count, token_info.to_string()).await?;
-                        } else {
-                            let mut context_parts = Vec::new();
-
-                            for fref in &file_refs {
-                                if let Some(content) = fref.read_content() {
-                                    Self::insert_text_before(terminal, &format!("\x1b[34mInfo:\x1b[0m 已引用: {}", fref.path.display()));
-                                    context_parts.push(content);
-                                } else {
-                                    Self::insert_text_before(terminal, &format!("\x1b[33mWarning:\x1b[0m 无法读取: {}", fref.path.display()));
-                                }
-                            }
-
-                            let augmented = if context_parts.is_empty() {
-                                cleaned_input
-                            } else {
-                                format!(
-                                    "{}\n\n{}",
-                                    context_parts.join("\n\n"),
-                                    cleaned_input
-                                )
-                            };
-                            self.handle_user_input(&augmented, terminal, editor, mode, message_count, token_info.to_string()).await?;
-                        }
+                    let should_exit = self.process_line(line, terminal, editor, mode, message_count, &token_info).await?;
+                    if should_exit {
+                        break;
                     }
                 }
                 InputSignal::CtrlC => {
@@ -482,19 +432,128 @@ impl Repl {
         });
     }
 
+    /// 处理一行用户输入：命令或 AI 对话。
+    /// 返回 true 表示应退出 REPL。
+    async fn process_line(
+        &mut self,
+        line: &str,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        editor: &mut LineEditor,
+        mode: crate::app::CliMode,
+        message_count: usize,
+        token_info: &str,
+    ) -> Result<bool> {
+        if CommandRegistry::is_command(line) {
+            disable_raw_mode().ok();
+            let result = self.commands.execute(line, self.state.clone()).await;
+            enable_raw_mode().ok();
+
+            match result {
+                Ok(CommandResult::Exit) => {
+                    Self::insert_text_before(terminal, "\x1b[34mInfo:\x1b[0m 再见！");
+                    return Ok(true);
+                }
+                Ok(CommandResult::Message(msg)) => {
+                    for msg_line in msg.lines() {
+                        Self::insert_text_before(terminal, msg_line);
+                    }
+                }
+                Ok(CommandResult::Continue) => {}
+                Err(e) => {
+                    Self::insert_text_before(terminal, &format!("\x1b[31mError:\x1b[0m 命令执行失败: {}", e));
+                }
+            }
+            return Ok(false);
+        }
+
+        let working_dir = {
+            let state = self.state.read().await;
+            state.working_dir.clone()
+        };
+        let (file_refs, cleaned_input) = parse_file_references(line, &working_dir);
+
+        let actual_input = if file_refs.is_empty() {
+            line.to_string()
+        } else {
+            let mut context_parts = Vec::new();
+            for fref in &file_refs {
+                if let Some(content) = fref.read_content() {
+                    Self::insert_text_before(terminal, &format!("\x1b[34mInfo:\x1b[0m 已引用: {}", fref.path.display()));
+                    context_parts.push(content);
+                } else {
+                    Self::insert_text_before(terminal, &format!("\x1b[33mWarning:\x1b[0m 无法读取: {}", fref.path.display()));
+                }
+            }
+            if context_parts.is_empty() {
+                cleaned_input
+            } else {
+                format!("{}\n\n{}", context_parts.join("\n\n"), cleaned_input)
+            }
+        };
+
+        // handle_user_input may return pending input typed during streaming
+        let mut pending = self.handle_user_input(&actual_input, terminal, editor, mode, message_count, token_info.to_string()).await?;
+
+        // Process any pending input that was typed during streaming
+        while let Some(queued_line) = pending.take() {
+            let queued_trimmed = queued_line.trim();
+            if queued_trimmed.is_empty() {
+                break;
+            }
+            Self::insert_text_before(terminal, &format!(
+                "\x1b[32m>\x1b[0m {}",
+                if queued_line.contains('\n') { queued_line.replace('\n', "\n    ") } else { queued_line.clone() }
+            ));
+
+            // Re-fetch state for updated counts
+            let (mode, message_count, token_info) = {
+                let state = self.state.read().await;
+                let msg_count = state.conversation.messages.len();
+                let token_str = format!("{}↑ {}↓", state.token_usage.input_tokens, state.token_usage.output_tokens);
+                (state.mode, msg_count, token_str)
+            };
+
+            if CommandRegistry::is_command(queued_trimmed) {
+                disable_raw_mode().ok();
+                let result = self.commands.execute(queued_trimmed, self.state.clone()).await;
+                enable_raw_mode().ok();
+                match result {
+                    Ok(CommandResult::Exit) => {
+                        Self::insert_text_before(terminal, "\x1b[34mInfo:\x1b[0m 再见！");
+                        return Ok(true);
+                    }
+                    Ok(CommandResult::Message(msg)) => {
+                        for msg_line in msg.lines() {
+                            Self::insert_text_before(terminal, msg_line);
+                        }
+                    }
+                    Ok(CommandResult::Continue) => {}
+                    Err(e) => {
+                        Self::insert_text_before(terminal, &format!("\x1b[31mError:\x1b[0m 命令执行失败: {}", e));
+                    }
+                }
+                break;
+            }
+
+            pending = self.handle_user_input(queued_trimmed, terminal, editor, mode, message_count, token_info).await?;
+        }
+
+        Ok(false)
+    }
+
     /// 处理用户输入（发送给 AI）
     ///
-    /// 使用 ratatui 的 insert_before 在 viewport 上方插入流式输出，
-    /// 输入框始终保持可见。
+    /// 使用 tokio::select! 同时轮询 AI 流和键盘事件，
+    /// 输入框在流式输出期间保持可编辑。
     async fn handle_user_input(
         &mut self,
         input: &str,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        editor: &LineEditor,
+        editor: &mut LineEditor,
         mode: crate::app::CliMode,
         message_count: usize,
         token_info: String,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         {
             let mut state = self.state.write().await;
             state.start_processing();
@@ -509,7 +568,7 @@ impl Repl {
             Self::insert_text_before(terminal, "\x1b[31mError:\x1b[0m AI Provider 未初始化。请设置 ANTHROPIC_API_KEY 环境变量。");
             let mut state = self.state.write().await;
             state.end_processing();
-            return Ok(());
+            return Ok(None);
         };
 
         {
@@ -544,7 +603,6 @@ impl Repl {
             .with_system_prompt(&system_prompt)
             .with_statusline(self.renderer.statusline_mut().clone());
 
-        // 插入 Assistant 标题
         Self::insert_lines_before(terminal, vec![
             Line::from(""),
             Line::from(Span::styled("Assistant", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD))),
@@ -556,6 +614,7 @@ impl Repl {
         use rig::agent::MultiTurnStreamItem;
         use rig::streaming::StreamedAssistantContent;
         use futures::StreamExt;
+        use crossterm::event::EventStream;
 
         let agent = {
             let mut tools = oxide_tools::rig_tools::OxideToolSetBuilder::new(working_dir.clone())
@@ -578,84 +637,153 @@ impl Repl {
         };
 
         let mut stream = agent.stream_prompt(&prompt).multi_turn(10).await;
+        let mut event_stream = EventStream::new();
 
         let mut full_response = String::new();
         let mut line_buffer = String::new();
         let mut is_thinking = false;
+        let mut pending_input: Option<String> = None;
+        let mut stream_done = false;
 
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
-                    if is_thinking {
-                        if !line_buffer.is_empty() {
-                            Self::insert_text_before(terminal, &line_buffer);
-                            line_buffer.clear();
+        loop {
+            if stream_done {
+                break;
+            }
+
+            tokio::select! {
+                biased;
+
+                // Poll keyboard events (higher priority)
+                maybe_event = event_stream.next() => {
+                    if let Some(Ok(ev)) = maybe_event {
+                        let is_key_press = matches!(
+                            &ev,
+                            Event::Key(crossterm::event::KeyEvent {
+                                kind: crossterm::event::KeyEventKind::Press,
+                                ..
+                            })
+                        );
+                        if !is_key_press && !matches!(&ev, Event::Resize(..) | Event::Paste(_)) {
+                            continue;
                         }
-                        Self::insert_text_before(terminal, "");
-                        is_thinking = false;
+
+                        if matches!(&ev, Event::Resize(..)) {
+                            self.redraw(terminal, editor, mode, &[], None, 0, message_count, &token_info);
+                            continue;
+                        }
+
+                        // Ctrl+C during streaming: cancel
+                        if let Event::Key(key_ev) = &ev {
+                            if key_ev.code == KeyCode::Char('c') && key_ev.modifiers.contains(KeyModifiers::CONTROL) {
+                                Self::insert_lines_before(terminal, vec![
+                                    Line::from(""),
+                                    Line::from(Span::styled("操作已取消", Style::default().fg(Color::Yellow))),
+                                ]);
+                                // Don't break here; drop the stream to stop it
+                                stream_done = true;
+                                continue;
+                            }
+                        }
+
+                        // Forward key events to editor
+                        if let Some(signal) = editor.handle_event(&ev) {
+                            match signal {
+                                InputSignal::Line(line) => {
+                                    pending_input = Some(line);
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        // Redraw input box to reflect typing
+                        self.redraw(terminal, editor, mode, &[], None, 0, message_count, &token_info);
                     }
+                }
 
-                    full_response.push_str(&text.text);
+                // Poll AI stream
+                maybe_chunk = stream.next() => {
+                    match maybe_chunk {
+                        Some(Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text)))) => {
+                            if is_thinking {
+                                if !line_buffer.is_empty() {
+                                    Self::insert_text_before(terminal, &line_buffer);
+                                    line_buffer.clear();
+                                }
+                                Self::insert_text_before(terminal, "");
+                                is_thinking = false;
+                            }
 
-                    for ch in text.text.chars() {
-                        if ch == '\n' {
-                            Self::insert_text_before(terminal, &line_buffer);
-                            line_buffer.clear();
-                        } else {
-                            line_buffer.push(ch);
+                            full_response.push_str(&text.text);
+
+                            for ch in text.text.chars() {
+                                if ch == '\n' {
+                                    Self::insert_text_before(terminal, &line_buffer);
+                                    line_buffer.clear();
+                                } else {
+                                    line_buffer.push(ch);
+                                }
+                            }
+                            // Redraw input box after inserting lines above
+                            self.redraw(terminal, editor, mode, &[], None, 0, message_count, &token_info);
+                        }
+                        Some(Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning)))) => {
+                            if !is_thinking {
+                                if !line_buffer.is_empty() {
+                                    Self::insert_text_before(terminal, &line_buffer);
+                                    line_buffer.clear();
+                                }
+                                Self::insert_lines_before(terminal, vec![
+                                    Line::from(""),
+                                    Line::from(Span::styled("💭 思考中:", Style::default().fg(Color::DarkGray))),
+                                ]);
+                                is_thinking = true;
+                            }
+
+                            for r in reasoning.reasoning {
+                                Self::insert_lines_before(terminal, vec![
+                                    Line::from(Span::styled(format!("  {}", r), Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM))),
+                                ]);
+                            }
+                            self.redraw(terminal, editor, mode, &[], None, 0, message_count, &token_info);
+                        }
+                        Some(Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall(tool_call)))) => {
+                            if !line_buffer.is_empty() {
+                                Self::insert_text_before(terminal, &line_buffer);
+                                line_buffer.clear();
+                            }
+                            Self::insert_lines_before(terminal, vec![
+                                Line::from(""),
+                                Line::from(vec![
+                                    Span::styled("⏺ ", Style::default().fg(Color::Green)),
+                                    Span::styled(
+                                        format!("{}({:?})", tool_call.function.name, tool_call.function.arguments),
+                                        Style::default(),
+                                    ),
+                                ]),
+                            ]);
+                            self.redraw(terminal, editor, mode, &[], None, 0, message_count, &token_info);
+                        }
+                        Some(Ok(MultiTurnStreamItem::FinalResponse(final_res))) => {
+                            full_response = final_res.response().to_string();
+                        }
+                        Some(Ok(_)) => {}
+                        Some(Err(e)) => {
+                            Self::insert_lines_before(terminal, vec![
+                                Line::from(""),
+                                Line::from(Span::styled(format!("错误: {}", e), Style::default().fg(Color::Red))),
+                            ]);
+
+                            let mut state = self.state.write().await;
+                            state.conversation.messages.pop();
+                            state.end_processing();
+
+                            return Err(anyhow::anyhow!("流式输出错误: {}", e));
+                        }
+                        None => {
+                            // Stream ended
+                            stream_done = true;
                         }
                     }
-                }
-                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning))) => {
-                    if !is_thinking {
-                        if !line_buffer.is_empty() {
-                            Self::insert_text_before(terminal, &line_buffer);
-                            line_buffer.clear();
-                        }
-                        Self::insert_lines_before(terminal, vec![
-                            Line::from(""),
-                            Line::from(Span::styled("💭 思考中:", Style::default().fg(Color::DarkGray))),
-                        ]);
-                        is_thinking = true;
-                    }
-
-                    for r in reasoning.reasoning {
-                        Self::insert_lines_before(terminal, vec![
-                            Line::from(Span::styled(format!("  {}", r), Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM))),
-                        ]);
-                    }
-                }
-                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall(tool_call))) => {
-                    if !line_buffer.is_empty() {
-                        Self::insert_text_before(terminal, &line_buffer);
-                        line_buffer.clear();
-                    }
-                    Self::insert_lines_before(terminal, vec![
-                        Line::from(""),
-                        Line::from(vec![
-                            Span::styled("⏺ ", Style::default().fg(Color::Green)),
-                            Span::styled(
-                                format!("{}({:?})", tool_call.function.name, tool_call.function.arguments),
-                                Style::default(),
-                            ),
-                        ]),
-                    ]);
-                }
-                Ok(MultiTurnStreamItem::FinalResponse(final_res)) => {
-                    full_response = final_res.response().to_string();
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    Self::insert_lines_before(terminal, vec![
-                        Line::from(""),
-                        Line::from(Span::styled(format!("错误: {}", e), Style::default().fg(Color::Red))),
-                    ]);
-
-                    let mut state = self.state.write().await;
-                    state.conversation.messages.pop();
-                    state.end_processing();
-
-                    return Err(anyhow::anyhow!("流式输出错误: {}", e));
                 }
             }
         }
@@ -664,41 +792,25 @@ impl Repl {
             Self::insert_text_before(terminal, &line_buffer);
         }
         Self::insert_text_before(terminal, "");
-
-        // Redraw input box after streaming completes
         self.redraw(terminal, editor, mode, &[], None, 0, message_count, &token_info);
 
-        let result: Result<String> = Ok(full_response);
+        self.renderer.statusline_mut().finish();
 
-        match result {
-            Ok(response) => {
-                self.renderer.statusline_mut().finish();
-
-                {
-                    let mut state = self.state.write().await;
-                    state.conversation.add_message(oxide_core::types::Message::text(
-                        oxide_core::types::Role::Assistant,
-                        &response,
-                    ));
-                    let input_tokens = utils::count_tokens(input) as u64;
-                    let output_tokens = utils::count_tokens(&response) as u64;
-                    state.update_token_usage(input_tokens, output_tokens, 0);
-                    state.end_processing();
-                }
+        {
+            let mut state = self.state.write().await;
+            if !full_response.is_empty() {
+                state.conversation.add_message(oxide_core::types::Message::text(
+                    oxide_core::types::Role::Assistant,
+                    &full_response,
+                ));
             }
-            Err(e) => {
-                self.renderer.statusline_mut().clear();
-                Self::insert_text_before(terminal, &format!("\x1b[31mError:\x1b[0m 代理执行失败: {}", e));
-
-                {
-                    let mut state = self.state.write().await;
-                    state.conversation.messages.pop();
-                    state.end_processing();
-                }
-            }
+            let input_tokens = utils::count_tokens(input) as u64;
+            let output_tokens = utils::count_tokens(&full_response) as u64;
+            state.update_token_usage(input_tokens, output_tokens, 0);
+            state.end_processing();
         }
 
-        Ok(())
+        Ok(pending_input)
     }
 
     fn format_chat_history(&self, messages: &[oxide_core::types::Message]) -> String {
