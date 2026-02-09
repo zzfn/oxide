@@ -504,16 +504,36 @@ impl Repl {
 
     /// 处理用户输入（发送给 AI）
     /// 
-    /// 流式渲染时会暂时退出 raw mode 以使用 MultiProgress 打印，
-    /// 完成后重新进入 raw mode 并重绘输入框。
+    /// 流式输出期间会暂时隐藏输入框，但显示一个占位符提示用户输入框仍然存在。
     async fn handle_user_input(&mut self, input: &str) -> Result<()> {
-        {
+        let (mode_char, mode_color, message_count) = {
             let mut state = self.state.write().await;
             state.start_processing();
-        }
+            let (mc, mc_color) = match state.mode {
+                crate::app::CliMode::Normal => ("N", "\x1b[32m"),
+                crate::app::CliMode::Fast => ("F", "\x1b[33m"),
+                crate::app::CliMode::Plan => ("P", "\x1b[36m"),
+            };
+            (mc, mc_color, state.conversation.messages.len())
+        };
 
-        // 暂时退出 raw mode 以进行流式输出
+        // 退出 raw mode 以进行流式输出
         disable_raw_mode()?;
+        
+        // 创建一个持久的进度条显示输入框状态
+        use indicatif::{ProgressBar, ProgressStyle};
+        let input_placeholder = self.renderer.multi_progress().add(ProgressBar::new_spinner());
+        input_placeholder.set_style(
+            ProgressStyle::default_spinner()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                .template("{spinner:.cyan} {msg}")
+                .unwrap()
+        );
+        input_placeholder.set_message(format!(
+            "\x1b[2m╭─\x1b[0m {}[{}]\x1b[0m 输入框就绪 \x1b[2m│\x1b[0m {} 条消息 \x1b[2m─╮\x1b[0m",
+            mode_color, mode_char, message_count
+        ));
+        input_placeholder.enable_steady_tick(std::time::Duration::from_millis(120));
         
         self.renderer.statusline_mut().start("Thinking");
 
@@ -566,6 +586,9 @@ impl Repl {
         self.renderer.statusline_mut().update("Processing", 0);
 
         let result = agent_runner.run_stream(&provider, input, chat_history).await;
+        
+        // 移除输入框占位符
+        input_placeholder.finish_and_clear();
         
         // 流式输出完成，重新进入 raw mode
         enable_raw_mode()?;
